@@ -130,11 +130,16 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------- HYDRATE dari localStorage + IndexedDB ---------- */
   useEffect(() => {
+    let mounted = true;
+    
     (async () => {
       try {
+        console.log("Starting hydration...");
+        
         // load docs (metadata) dari LS
         const metaJson = localStorage.getItem(LS_DOCS_KEY);
         const metas: DocMeta[] = metaJson ? JSON.parse(metaJson) : [];
+        console.log("Loaded metadata:", metas.length, "documents");
 
         // gabungkan dengan file Blob dari IndexedDB
         const restored: DocRow[] = await Promise.all(
@@ -145,24 +150,40 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
               if (blob) {
                 file = new File([blob], m.name, { type: mimeFromExt(m.type) });
               }
-            } catch {
+            } catch (error) {
+              console.warn("Failed to load file from IndexedDB:", m.id, error);
               // jika gagal ambil file, biarkan undefined
             }
             return { ...m, file };
           }),
         );
-        setDocuments(restored);
+        
+        if (mounted) {
+          setDocuments(restored);
+          console.log("Documents restored:", restored.length);
+        }
 
         // load recent queries
         const rqJson = localStorage.getItem(LS_QUERIES_KEY);
         const rq: RecentQuery[] = rqJson ? JSON.parse(rqJson) : [];
-        setRecentQueries(rq);
+        
+        if (mounted) {
+          setRecentQueries(rq);
+          console.log("Queries restored:", rq.length);
+        }
       } catch (e) {
         console.error("Gagal hydrate:", e);
       } finally {
-        setHydrated(true);
+        if (mounted) {
+          console.log("Hydration completed");
+          setHydrated(true);
+        }
       }
     })();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   /* ---------- Persist otomatis saat state berubah ---------- */

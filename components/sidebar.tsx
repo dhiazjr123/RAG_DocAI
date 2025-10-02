@@ -26,7 +26,7 @@ export default function Sidebar() {                    // ⬅️ export default
               <Link key={m.href} href={m.href} className="block">
                 <Button
                   variant={active ? "default" : "ghost"}
-                  className={cn("w-full justify-start gap-2", active && "bg-primary text-primary-foreground")}
+                  className={cn("w-full justify-start gap-2", active && "btn-gradient")}
                 >
                   <Icon className="h-4 w-4" />
                   {m.label}

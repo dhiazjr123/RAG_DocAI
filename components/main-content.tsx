@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, MessageSquare, Clock, Download, Trash2, TrendingUp, Filter } from "lucide-react";
 import { useDocuments } from "@/components/documents-context";
 import FileUploadButton from "@/components/file-upload-button"; // ⬅️ NEW
+import { cn } from "@/lib/utils";
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts;
@@ -79,7 +80,7 @@ export function MainContent() {
           <Button
             variant="ghost"
             size="sm"
-            className="ring-ambient text-muted-foreground hover:text-foreground"
+            className="ring-ambient text-gradient hover:text-foreground"
             disabled={recentQueries.length === 0}
             onClick={() => {
               if (recentQueries.length === 0) return;
@@ -153,7 +154,7 @@ export function MainContent() {
               label="Upload Document"
               variant="outline"
               size="sm"
-              className="gap-2 ring-ambient"
+              className="gap-2 ring-ambient btn-gradient"
             />
           </div>
         </CardHeader>
@@ -182,7 +183,10 @@ export function MainContent() {
                       <td className="py-3 px-2 text-sm text-muted-foreground">{doc.size}</td>
                       <td className="py-3 px-2 text-sm text-muted-foreground">{doc.uploadDate}</td>
                       <td className="py-3 px-2">
-                        <Badge variant={doc.status === "Processed" ? "default" : "secondary"} className="text-xs">
+                        <Badge 
+                          variant={doc.status === "Processed" ? "default" : "secondary"} 
+                          className={cn("text-xs", doc.status === "Processed" && "btn-gradient")}
+                        >
                           {doc.status}
                         </Badge>
                       </td>
