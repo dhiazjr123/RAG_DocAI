@@ -33,7 +33,7 @@ export function Header() {
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" className="ring-ambient"><HelpCircle className="h-4 w-4" /></Button>
             <Button variant="ghost" size="sm" className="ring-ambient"><Settings className="h-4 w-4" /></Button>
-            <Button variant="destructive" size="sm" className="ring-ambient" onClick={onLogout}>
+            <Button variant="default" size="sm" className="ring-ambient btn-gradient" onClick={onLogout}>
               <LogOut className="h-4 w-4 mr-2" /> Logout
             </Button>
             <Avatar className="h-8 w-8">
