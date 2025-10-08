@@ -23,12 +23,13 @@ export async function POST(req: Request) {
     }
 
     const sysPrompt = [
-      "Anda adalah asisten RAG.",
-      "Jawab singkat, akurat, dan gunakan konteks berikut bila relevan.",
-      "Jika konteks tidak memuat jawabannya, katakan tidak tahu.",
+      "Anda adalah asisten AI yang membantu dan informatif.",
+      "Jika ada konteks dokumen yang relevan, gunakan untuk menjawab pertanyaan.",
+      "Jika tidak ada konteks atau konteks tidak relevan, jawab pertanyaan umum berdasarkan pengetahuan Anda.",
+      "Selalu berikan jawaban yang bermanfaat dan ramah.",
       "",
       "=== KONTEN KONTEXT ===",
-      context || "(no context)",
+      context || "(tidak ada dokumen yang di-upload)",
       "=======================",
     ].join("\n");
 

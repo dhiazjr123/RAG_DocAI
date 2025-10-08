@@ -454,8 +454,11 @@ export default function AssistantWorkspace() {
 
           <CardContent className="pt-4 flex-1 overflow-auto space-y-4">
             {msgs.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                Tambahkan sumber di sebelah kiri, lalu ajukan pertanyaan di sini.
+              <div className="text-sm text-muted-foreground text-center py-8">
+                <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>Selamat datang! Anda bisa:</p>
+                <p>• Upload dokumen di panel "Sumber" untuk chat dengan konteks</p>
+                <p>• Atau langsung tanyakan apapun di sini</p>
               </div>
             ) : (
               msgs.map((m) => (
