@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 export default function Sidebar() {                    // ⬅️ export default
   const pathname = usePathname();
   const menu = [
-    { href: "/assistant", label: "AI Assistant", icon: Bot },
+    { href: "/assistant-workspace", label: "AI Assistant", icon: Bot },
     { href: "/", label: "Overview", icon: BarChart3 },
     { href: "/#documents", label: "Documents", icon: FileText },
   ];
