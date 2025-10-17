@@ -323,6 +323,7 @@ export default function AssistantWorkspace() {
   /* ===== Komponen kecil ===== */
   const Separator = () => <div className="w-full h-px bg-border" />;
 
+
   function PreviewPane() {
     if (!currentDoc) return null;
     const ext = (currentDoc.name.split(".").pop() || "").toLowerCase();
