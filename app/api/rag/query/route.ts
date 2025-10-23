@@ -1,13 +1,47 @@
 // app/api/rag/query/route.ts
 import { NextResponse } from "next/server";
+import { parseTableFromText, findRowByName } from "@/lib/parse-yogyakarta-pajak";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto"; // boleh diganti
+const MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto";
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+
+function rupiah(n: number) {
+  try {
+    return "Rp " + Number(n || 0).toLocaleString("id-ID");
+  } catch {
+    return `Rp ${n}`;
+  }
+}
+
+function normalize(s = "") {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function extractJenisDanSub(query: string) {
+  const q = normalize(query);
+  const jenis =
+    /bbnkb\s*ii\b/.test(q) ? "bbnkb2" :
+    /bbnkb\b/.test(q) ? "bbnkb1" :
+    /swdkllj/.test(q) ? "swdkllj" : "pkb";
+
+  const sub =
+    /denda/.test(q) ? "denda" :
+    /pokok/.test(q) ? "pokok" : "jumlah";
+
+  return { jenis, sub };
+}
+
+function extractNama(query: string) {
+  const q = query;
+  // ambil frasa setelah "nama kasir", "nama kppd", atau "dari"
+  const m = q.match(/(?:nama\s+(?:kasir|kppd)|dari)\s+(.+)$/i);
+  return m ? m[1].trim() : "";
+}
 
 export async function POST(req: Request) {
   try {
@@ -18,85 +52,68 @@ export async function POST(req: Request) {
 
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
-    
-    // Debug log
-    console.log('Debug - OpenRouter Key:', openrouterKey ? 'SET' : 'NOT SET');
-    console.log('Debug - Groq Key:', groqKey ? 'SET' : 'NOT SET');
 
-    // Limit context size to avoid token limit (rough estimate: 1 token ≈ 4 chars)
-<<<<<<< HEAD
-    const MAX_CONTEXT_CHARS = 20000; // ~5000 tokens, leaving room for query + system prompt
-=======
-    const MAX_CONTEXT_CHARS = 25000; // Increased to give more context
->>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
+    // === batasi context
+    const MAX_CONTEXT_CHARS = 25000;
     let limitedContext = context || "(no context)";
     if (limitedContext.length > MAX_CONTEXT_CHARS) {
       limitedContext = limitedContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n[... context truncated ...]";
     }
 
-    // Get current time info
-    const now = new Date();
-    const timeInfo = {
-      date: now.toLocaleDateString('id-ID', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      }),
-      time: now.toLocaleTimeString('id-ID', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      }),
-      greeting: now.getHours() < 12 ? 'pagi' : 
-                now.getHours() < 15 ? 'siang' : 
-                now.getHours() < 18 ? 'sore' : 'malam'
-    };
+    // === 1) JALUR DETERMINISTIK (parser angka -> jawaban)
+    const rows = parseTableFromText(limitedContext);
+    const { jenis, sub } = extractJenisDanSub(query);
+    const namaReq = extractNama(query);
 
-    const sysPrompt = [
-<<<<<<< HEAD
-      "Anda adalah asisten RAG yang netral dan sangat teliti.",
-      "Jawab HANYA berdasarkan data eksplisit dalam konteks; jangan mengira-ngira.",
-      "",
-      "ATURAN DISAMBIGUASI NILAI:",
-      "1) Jika ditanya 'pokok' (misal: 'PKB pokok'), JANGAN pakai 'jumlah' atau 'total' yang termasuk denda. Ambil nilai pada baris/kolom berlabel 'pokok' saja.",
-      "2) Jika ditanya 'denda', JANGAN pakai pokok ataupun jumlah. Ambil nilai pada baris/kolom berlabel 'denda'.",
-      "3) Jika ditanya 'jumlah' atau 'total', barulah gunakan 'jumlah' (pokok + denda) jika memang begitu labelnya.",
-      "4) Jika pertanyaan menyebut lokasi/kasir tertentu (misal 'kasir samsat sewon'), batasi pencarian pada bagian yang menyebut lokasi/kasir tersebut.",
-      "5) Jika ada beberapa baris, pilih yang paling spesifik konteksnya (PKB vs pajak lain, lokasi yang disebut, periode/nota yang cocok).",
-      "6) Jika ragu atau label tidak ada, katakan tidak pasti dan tampilkan 1-3 kandidat baris terkait untuk diverifikasi user.",
-      "",
-      "FORMAT JAWABAN:",
-      "- Berikan nominal dengan format 'Rp X.XXX.XXX' yang persis seperti di dokumen.",
-      "- Sebutkan label yang dipakai (pokok/denda/jumlah) dan lokasi/kasir jika relevan.",
-      "- Kutip 1 baris sumber paling relevan dari konteks (tanpa menambah/mengubah angka).",
-      "",
-      "CONTOH PENANGANAN KASUS:",
-      "Q: 'denda di PKB dari kasir samsat sewon berapa' → Cari baris yang mengandung 'PKB' AND 'denda' AND 'samsat sewon'. Jawab hanya nilai denda.",
-      "Q: 'pokok PKB samsat sewon' → Cari label 'pokok' (bukan jumlah).",
-=======
-      "Anda adalah asisten RAG yang ahli dalam menganalisis dokumen keuangan dan pajak.",
-      "Jawab singkat, akurat, dan gunakan konteks berikut bila relevan.",
-      "Jika konteks tidak memuat jawabannya, katakan tidak tahu.",
-      "",
-      "INSTRUKSI:",
-      "- Baca konteks dokumen dengan teliti",
-      "- Cari informasi yang tepat sesuai pertanyaan",
-      "- Jika ditanya tentang PKB, fokus pada PKB saja",
-      "- Jika ditanya tentang SWDKLLJ, fokus pada SWDKLLJ saja",
-      "- Berikan angka yang tepat dari dokumen",
->>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
-      "",
-      `INFO WAKTU SAAT INI:`,
-      `- Tanggal: ${timeInfo.date}`,
-      `- Jam: ${timeInfo.time}`,
-      `- Salam yang tepat: Selamat ${timeInfo.greeting}`,
-      "",
-      "=== KONTEN KONTEXT ===",
-      limitedContext,
-      "=======================",
-    ].join("\n");
+    if (rows.length && namaReq) {
+      const row = findRowByName(rows, namaReq);
+      if (row) {
+        const map: Record<string, number> = {
+          // PKB
+          "pkb.pokok": row.pkb_pokok,
+          "pkb.denda": row.pkb_denda,
+          "pkb.jumlah": row.pkb_jumlah,
+          // BBNKB I
+          "bbnkb1.pokok": row.bbnkb1_pokok,
+          "bbnkb1.denda": row.bbnkb1_denda,
+          "bbnkb1.jumlah": row.bbnkb1_jumlah,
+          // BBNKB II
+          "bbnkb2.pokok": row.bbnkb2_pokok,
+          "bbnkb2.denda": row.bbnkb2_denda,
+          "bbnkb2.jumlah": row.bbnkb2_jumlah,
+          // SWDKLLJ (anggap satu kolom jumlah)
+          "swdkllj.jumlah": row.swdkllj,
+        };
+        const key = jenis === "swdkllj" ? "swdkllj.jumlah" : `${jenis}.${sub}`;
+        if (key in map) {
+          const val = map[key];
+          const labelJenis =
+            jenis === "bbnkb1" ? "BBNKB I" :
+            jenis === "bbnkb2" ? "BBNKB II" :
+            jenis === "swdkllj" ? "SWDKLLJ" : "PKB";
+          const labelSub =
+            jenis === "swdkllj" ? "" : ` ${sub.toUpperCase()}`;
+          const answerDet = `${labelJenis}${labelSub} untuk ${row.nama} = ${rupiah(val)}.`;
+          return NextResponse.json({ answer: answerDet, sources: [] });
+        }
+      }
+    }
 
-    // Try OpenRouter first
+    // === 2) FALLBACK KE LLM (untuk parafrase/pertanyaan bebas)
+    const sysPrompt =
+      `Anda asisten RAG untuk tabel pajak daerah.
+ATURAN KERAS:
+- Jika pengguna menyebut PKB/BBNKB I/BBNKB II/SWDKLLJ, jawab HANYA dari kolom tersebut.
+- Jika menyebut "pokok/denda/jumlah", ambil sub-kolom tepatnya.
+- Jika data tidak ada di konteks, jawab: "Tidak ditemukan di dokumen." Tanpa spekulasi.
+- Format angka dalam Rupiah (id-ID). Jawaban singkat dan tepat.
+=== KONTEN KONTEKS MULAI ===
+${limitedContext}
+=== KONTEN KONTEKS SELESAI ===`;
+
+    const userMsg = query;
+
+    // Try OpenRouter
     if (openrouterKey) {
       try {
         const resp = await fetch(OPENROUTER_URL, {
@@ -111,28 +128,23 @@ export async function POST(req: Request) {
             model: MODEL,
             messages: [
               { role: "system", content: sysPrompt },
-              { role: "user", content: query },
+              { role: "user", content: userMsg },
             ],
-<<<<<<< HEAD
             temperature: 0.1,
-=======
-            temperature: 0.2,
->>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
           }),
         });
 
         const data = await resp.json();
         if (resp.ok) {
-          const answer = data?.choices?.[0]?.message?.content || "Saya tidak tahu.";
+          const answer = data?.choices?.[0]?.message?.content || "Tidak ditemukan di dokumen.";
           return NextResponse.json({ answer, sources: [] });
         }
-        // If OpenRouter fails, try Groq
-      } catch (e) {
-        // If OpenRouter fails, try Groq
+      } catch {
+        // lanjut ke Groq
       }
     }
 
-    // Fallback to Groq
+    // Fallback Groq
     if (groqKey) {
       try {
         const resp = await fetch(GROQ_URL, {
@@ -145,19 +157,15 @@ export async function POST(req: Request) {
             model: GROQ_MODEL,
             messages: [
               { role: "system", content: sysPrompt },
-              { role: "user", content: query },
+              { role: "user", content: userMsg },
             ],
-<<<<<<< HEAD
             temperature: 0.1,
-=======
-            temperature: 0.2,
->>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
           }),
         });
 
         const data = await resp.json();
         if (resp.ok) {
-          const answer = data?.choices?.[0]?.message?.content || "Saya tidak tahu.";
+          const answer = data?.choices?.[0]?.message?.content || "Tidak ditemukan di dokumen.";
           return NextResponse.json({ answer, sources: [] });
         }
         const msg = data?.error?.message || `Groq error (${resp.status})`;
@@ -167,14 +175,13 @@ export async function POST(req: Request) {
       }
     }
 
+    // Jika tidak ada API key, kembalikan jawaban default
     return NextResponse.json({ 
-      error: "OPENROUTER_API_KEY atau GROQ_API_KEY harus diset di .env.local" 
-    }, { status: 500 });
+      answer: "Tidak ditemukan di dokumen.", 
+      sources: [] 
+    });
+
   } catch (e: any) {
-    console.error("QUERY ERROR:", e);
-    return NextResponse.json(
-      { error: e?.message || "Gagal memproses query." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Gagal memproses query." }, { status: 500 });
   }
 }
