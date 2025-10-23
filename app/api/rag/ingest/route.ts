@@ -10,16 +10,16 @@ function extOf(name = "") {
   return (name.split(".").pop() || "").toLowerCase();
 }
 
-function splitToBlocks(text: string, blockSize = 1200): ParsedBlock[] {
-  const out: ParsedBlock[] = [];
-  const clean = (text || "").replace(/\r/g, "").trim();
-  if (!clean) return [{ id: "1", label: "Text 1", content: "(empty file)" }];
-  let i = 0, idx = 1;
-  while (i < clean.length) {
-    out.push({ id: String(idx), label: `Text ${idx}`, content: clean.slice(i, i + blockSize).trim() });
-    i += blockSize; idx++;
-  }
-  return out;
+function asBlocksFromLines(lines: string[]): ParsedBlock[] {
+  if (!lines?.length) return [{ id: "1", label: "Text 1", content: "(empty)" }];
+  return lines.map((l, i) => ({ id: String(i + 1), label: `Row ${i + 1}`, content: l.trim() }));
+}
+
+// fallback lama (pdf-parse) – tetap ada
+async function pdfParseFallback(buf: Buffer): Promise<string> {
+  const pdfParse = await import("pdf-parse");
+  const data = await pdfParse.default(buf);
+  return String(data.text || "").trim();
 }
 
 export async function POST(req: Request) {
@@ -35,85 +35,66 @@ export async function POST(req: Request) {
     const mime = f.type || "";
     const ext = extOf(name);
 
-    if (typeof f.size === "number" && f.size === 0) {
-      return NextResponse.json({ error: "File kosong (size = 0)." }, { status: 400 });
-    }
-
     const ab = await f.arrayBuffer();
-    if (!ab || ab.byteLength === 0) {
-      return NextResponse.json({ error: "Gagal membaca data file (arrayBuffer kosong)." }, { status: 400 });
-    }
     const buf = Buffer.from(ab);
 
-    let text = "";
+    let parsedBlocks: ParsedBlock[] = [];
+    let usedDocling = false;
 
-    // ===== PDF =====
-    if (mime.includes("pdf") || ext === "pdf") {
-      try {
-        // Simple PDF parsing fallback - just return file info for now
-        // TODO: Implement proper PDF parsing later
-        text = `PDF File: ${name}\nSize: ${f.size} bytes\nType: PDF Document\nNote: PDF content parsing is temporarily disabled. Please use TXT, DOCX, or image files for now.`;
-      } catch (pdfError: any) {
-        console.error("PDF Parse Error:", pdfError);
-        text = `PDF File: ${name}\nSize: ${f.size} bytes\nError: ${pdfError.message}`;
+    // ======= 0) Coba Docling lokal via Python (tanpa service HTTP) =======
+    try {
+      const mod: any = await import("@/lib/doclingExtractor");
+      if (mod && typeof mod.extractDocument === "function") {
+        const result = await mod.extractDocument(buf, name, mime);
+        if (result?.success) {
+          const text = String(result.text || "");
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          parsedBlocks = asBlocksFromLines(lines);
+          usedDocling = true;
+        }
       }
+    } catch {
+      // diam-diam lanjut ke opsi lain
     }
 
-    // ===== TXT / MD / CSV / LOG =====
-    else if (
-      mime.startsWith("text/") ||
-      ["txt", "md", "csv", "log"].includes(ext)
-    ) {
-      text = buf.toString("utf8");
-    }
+    // ======= 1) Coba Docling service jika tersedia =======
+    const DOC_SERVICE_URL = process.env.DOC_SERVICE_URL || "http://localhost:8008/extract";
+    try {
+      // hanya untuk PDF / DOCX
+      if (!parsedBlocks.length && (ext === "pdf" || mime.includes("pdf") || ext === "docx")) {
+        const fd = new FormData();
+        fd.append("file", new Blob([buf], { type: mime || "application/pdf" }), name);
 
-    // ===== DOCX =====
-    else if (ext === "docx" || mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-      try {
-        const mammoth: any = await import("mammoth");
-        const { value } = await mammoth.extractRawText({ buffer: buf });
-        text = String(value || "").trim();
-      } catch (docxError: any) {
-        console.error("DOCX Parse Error:", docxError);
-        text = `DOCX File: ${name}\nSize: ${f.size} bytes\nError: ${docxError.message}`;
+        const r = await fetch(DOC_SERVICE_URL, { method: "POST", body: fd as any });
+        if (r.ok) {
+          const j: any = await r.json();
+          const rowLines: string[] = j?.row_lines || [];
+          if (rowLines.length) {
+            parsedBlocks = asBlocksFromLines(rowLines);
+            usedDocling = true;
+          } else if (j?.raw_text) {
+            // fallback ke raw markdown dari docling
+            const lines = String(j.raw_text).split(/\r?\n/).filter(Boolean);
+            parsedBlocks = asBlocksFromLines(lines);
+            usedDocling = true;
+          }
+        }
       }
+    } catch {
+      // diam-diam fallback
     }
 
-    // ===== IMAGE (OCR) =====
-    else if (
-      ["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ||
-      mime.startsWith("image/")
-    ) {
-      try {
-        const tesseract: any = await import("tesseract.js");
-        // default model bahasa Inggris; ganti 'ind' jika mau pakai model Indonesia
-        const { data } = await tesseract.createWorker("eng").then(async (worker: any) => {
-          const res = await worker.recognize(buf);
-          await worker.terminate();
-          return res;
-        });
-        text = String(data?.text || "").trim();
-      } catch (ocrError: any) {
-        console.error("OCR Error:", ocrError);
-        text = `Image File: ${name}\nSize: ${f.size} bytes\nError: ${ocrError.message}`;
-      }
+    // ======= 2) Fallback ke parser lama bila Docling gagal =======
+    if (!parsedBlocks.length) {
+      const text = await pdfParseFallback(buf);
+      const lines = text.split(/\r?\n/).filter(l => /^\d+\.\s+/.test(l.trim()));
+      parsedBlocks = lines.length
+        ? asBlocksFromLines(lines)
+        : asBlocksFromLines(text.split(/\r?\n/));
     }
 
-    // ===== belum didukung =====
-    else {
-      return NextResponse.json(
-        { error: `Tipe file .${ext} belum didukung. Gunakan PDF, DOCX, TXT/MD atau gambar (PNG/JPG/JPEG/WEBP/GIF).` },
-        { status: 415 }
-      );
-    }
-
-    const parsedBlocks = splitToBlocks(text);
-    return NextResponse.json({ parsedBlocks });
+    return NextResponse.json({ parsedBlocks, usedDocling });
   } catch (e: any) {
-    console.error("INGEST ERROR:", e);
-    return NextResponse.json(
-      { error: e?.message || "Gagal memproses file." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Gagal memproses file." }, { status: 500 });
   }
 }

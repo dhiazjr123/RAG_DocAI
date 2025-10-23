@@ -24,7 +24,11 @@ export async function POST(req: Request) {
     console.log('Debug - Groq Key:', groqKey ? 'SET' : 'NOT SET');
 
     // Limit context size to avoid token limit (rough estimate: 1 token ≈ 4 chars)
+<<<<<<< HEAD
     const MAX_CONTEXT_CHARS = 20000; // ~5000 tokens, leaving room for query + system prompt
+=======
+    const MAX_CONTEXT_CHARS = 25000; // Increased to give more context
+>>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
     let limitedContext = context || "(no context)";
     if (limitedContext.length > MAX_CONTEXT_CHARS) {
       limitedContext = limitedContext.substring(0, MAX_CONTEXT_CHARS) + "\n\n[... context truncated ...]";
@@ -49,6 +53,7 @@ export async function POST(req: Request) {
     };
 
     const sysPrompt = [
+<<<<<<< HEAD
       "Anda adalah asisten RAG yang netral dan sangat teliti.",
       "Jawab HANYA berdasarkan data eksplisit dalam konteks; jangan mengira-ngira.",
       "",
@@ -68,6 +73,18 @@ export async function POST(req: Request) {
       "CONTOH PENANGANAN KASUS:",
       "Q: 'denda di PKB dari kasir samsat sewon berapa' → Cari baris yang mengandung 'PKB' AND 'denda' AND 'samsat sewon'. Jawab hanya nilai denda.",
       "Q: 'pokok PKB samsat sewon' → Cari label 'pokok' (bukan jumlah).",
+=======
+      "Anda adalah asisten RAG yang ahli dalam menganalisis dokumen keuangan dan pajak.",
+      "Jawab singkat, akurat, dan gunakan konteks berikut bila relevan.",
+      "Jika konteks tidak memuat jawabannya, katakan tidak tahu.",
+      "",
+      "INSTRUKSI:",
+      "- Baca konteks dokumen dengan teliti",
+      "- Cari informasi yang tepat sesuai pertanyaan",
+      "- Jika ditanya tentang PKB, fokus pada PKB saja",
+      "- Jika ditanya tentang SWDKLLJ, fokus pada SWDKLLJ saja",
+      "- Berikan angka yang tepat dari dokumen",
+>>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
       "",
       `INFO WAKTU SAAT INI:`,
       `- Tanggal: ${timeInfo.date}`,
@@ -96,7 +113,11 @@ export async function POST(req: Request) {
               { role: "system", content: sysPrompt },
               { role: "user", content: query },
             ],
+<<<<<<< HEAD
             temperature: 0.1,
+=======
+            temperature: 0.2,
+>>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
           }),
         });
 
@@ -126,7 +147,11 @@ export async function POST(req: Request) {
               { role: "system", content: sysPrompt },
               { role: "user", content: query },
             ],
+<<<<<<< HEAD
             temperature: 0.1,
+=======
+            temperature: 0.2,
+>>>>>>> fdd87e3 (WIP: simpan perubahan lokal sebelum rebase)
           }),
         });
 

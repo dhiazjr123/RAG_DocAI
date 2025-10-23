@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play
+  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play, ArrowLeft
 } from "lucide-react";
 import { useDocuments } from "@/components/documents-context";
 import FileUploadButton from "@/components/file-upload-button";
@@ -123,6 +124,7 @@ async function findDocByFile(
 
 /* ========= Komponen Utama ========= */
 export default function AssistantWorkspace() {
+  const router = useRouter();
   const { documents, addFromFiles, addQuery } = useDocuments();
 
   // Dokumen aktif
@@ -346,28 +348,47 @@ export default function AssistantWorkspace() {
 
   /* ===== UI: NotebookLM-style (Sumber | Chat | Studio) ===== */
   return (
-    <main className="p-4 md:p-6 overflow-auto page-gradient">
-      {/* Notifications */}
-      {notifications.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 space-y-2">
-          {notifications.map((notification) => (
-            <div
-              key={notification.id}
-              className={`px-4 py-3 rounded-lg shadow-lg border backdrop-blur-sm max-w-sm transform transition-all duration-300 ease-in-out animate-in slide-in-from-right-5 ${
-                notification.type === 'success'
-                  ? 'bg-emerald-500/90 text-white border-emerald-400'
-                  : 'bg-red-500/90 text-white border-red-400'
-              }`}
+    <div className="min-h-screen page-gradient">
+      {/* Header */}
+      <div className="border-b border-border bg-card/70 glass soft-shadow">
+        <div className="flex h-16 items-center justify-between px-6">
+          <div className="flex items-center gap-4">
+            <Button 
+              variant="default" 
+              size="sm" 
+              onClick={() => router.back()}
+              className="ring-ambient btn-gradient"
             >
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-medium">{notification.message}</div>
-              </div>
-            </div>
-          ))}
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <h1 className="text-xl font-semibold text-gradient">AI Assistant Workspace</h1>
+          </div>
         </div>
-      )}
-      
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      </div>
+
+      <main className="p-4 md:p-6 overflow-auto">
+        {/* Notifications */}
+        {notifications.length > 0 && (
+          <div className="fixed top-20 right-4 z-50 space-y-2">
+            {notifications.map((notification) => (
+              <div
+                key={notification.id}
+                className={`px-4 py-3 rounded-lg shadow-lg border backdrop-blur-sm max-w-sm transform transition-all duration-300 ease-in-out animate-in slide-in-from-right-5 ${
+                  notification.type === 'success'
+                    ? 'bg-emerald-500/90 text-white border-emerald-400'
+                    : 'bg-red-500/90 text-white border-red-400'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-medium">{notification.message}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
 
         {/* ========== SUMBER (kiri) ========== */}
         <Card className="lg:col-span-3 bg-card/70 glass soft-shadow hover-card flex flex-col">
@@ -604,5 +625,6 @@ export default function AssistantWorkspace() {
         </div>
       </div>
     </main>
+    </div>
   );
 }
