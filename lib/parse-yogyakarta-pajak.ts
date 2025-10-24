@@ -30,11 +30,12 @@ function normalizeName(s = ""): string {
 }
 
 /**
- * Heuristic: parse table-like lines.
+ * Improved heuristic: parse table-like lines dengan deteksi yang lebih baik.
  * - Detect lines beginning with an index (e.g., "1.", "12.")
  * - Extract currency-like numbers (e.g., 1.234.567) in order
  * - Assign numbers to known columns by position
  * - The text between the leading index and the first number is treated as `nama`
+ * - IMPROVEMENT: Better detection for denda and swdkllj
  */
 export function parseTableFromText(text: string): PajakRow[] {
   if (!text) return [];
@@ -43,8 +44,41 @@ export function parseTableFromText(text: string): PajakRow[] {
   const out: PajakRow[] = [];
   for (const raw of lines) {
     const line = raw.replace(/\u00A0/g, " ").trim();
+    
+    // IMPROVEMENT: Lebih fleksibel untuk deteksi baris data
     const m = line.match(/^(\d+)\s*\./);
-    if (!m) continue;
+    if (!m) {
+      // Coba deteksi baris tanpa nomor tapi dengan nama dan angka
+      if (line.match(/^[A-Z\s]+[0-9,\.]/) && line.match(/\d{1,3}(?:\.\d{3})*(?:,\d+)?/)) {
+        // Baris tanpa nomor, tambahkan nomor otomatis
+        const numMatches = Array.from(line.matchAll(/(?:Rp\s*)?\d{1,3}(?:\.\d{3})*(?:,\d+)?/g)).map((mm) => mm[0]);
+        if (numMatches.length >= 4) {
+          const firstNumIdx = line.search(/(?:Rp\s*)?\d{1,3}(?:\.\d{3})*(?:,\d+)?/);
+          const nama = line.slice(0, firstNumIdx).replace(/\s+/g, " ").trim();
+          
+          const nums = numMatches.map(toNumberOrZero);
+          const val = (idx: number) => (idx < nums.length ? nums[idx] : 0);
+          
+          const row: PajakRow = {
+            no: out.length + 1,
+            nama,
+            pkb_pokok: val(0),
+            pkb_denda: val(1),
+            pkb_jumlah: val(2),
+            bbnkb1_pokok: val(3),
+            bbnkb1_denda: val(4),
+            bbnkb1_jumlah: val(5),
+            bbnkb2_pokok: val(6),
+            bbnkb2_denda: val(7),
+            bbnkb2_jumlah: val(8),
+            swdkllj: val(9),
+          };
+          
+          out.push(row);
+        }
+      }
+      continue;
+    }
 
     const no = parseInt(m[1], 10);
     // Split into [prefix (nama + maybe codes)] and numbers

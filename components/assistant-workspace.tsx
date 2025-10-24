@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play, ArrowLeft
+  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play
 } from "lucide-react";
 import { useDocuments } from "@/components/documents-context";
 import FileUploadButton from "@/components/file-upload-button";
@@ -353,15 +353,6 @@ export default function AssistantWorkspace() {
       <div className="border-b border-border bg-card/70 glass soft-shadow">
         <div className="flex h-16 items-center justify-between px-6">
           <div className="flex items-center gap-4">
-            <Button 
-              variant="default" 
-              size="sm" 
-              onClick={() => router.back()}
-              className="ring-ambient btn-gradient"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
             <h1 className="text-xl font-semibold text-gradient">AI Assistant Workspace</h1>
           </div>
         </div>

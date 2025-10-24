@@ -113,9 +113,12 @@ ${limitedContext}
 
     const userMsg = query;
 
-    // Try OpenRouter
+    // Try OpenRouter dengan timeout
     if (openrouterKey) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 detik timeout
+
         const resp = await fetch(OPENROUTER_URL, {
           method: "POST",
           headers: {
@@ -132,20 +135,24 @@ ${limitedContext}
             ],
             temperature: 0.1,
           }),
+          signal: controller.signal,
         });
 
+        clearTimeout(timeoutId);
         const data = await resp.json();
         if (resp.ok) {
           const answer = data?.choices?.[0]?.message?.content || "Tidak ditemukan di dokumen.";
           return NextResponse.json({ answer, sources: [] });
         }
-      } catch {
+      } catch (e) {
+        console.log("OpenRouter timeout/error, fallback ke Groq:", e.message);
         // lanjut ke Groq
       }
     }
 
     // Fallback Groq
     if (groqKey) {
+      console.log("Menggunakan Groq API...");
       try {
         const resp = await fetch(GROQ_URL, {
           method: "POST",

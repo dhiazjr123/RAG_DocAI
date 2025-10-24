@@ -15,11 +15,55 @@ function asBlocksFromLines(lines: string[]): ParsedBlock[] {
   return lines.map((l, i) => ({ id: String(i + 1), label: `Row ${i + 1}`, content: l.trim() }));
 }
 
-// fallback lama (pdf-parse) – tetap ada
+// fallback lama (pdf-parse) – dengan improvement untuk deteksi tabel
 async function pdfParseFallback(buf: Buffer): Promise<string> {
   const pdfParse = await import("pdf-parse");
   const data = await pdfParse.default(buf);
-  return String(data.text || "").trim();
+  let text = String(data.text || "").trim();
+  
+  // Improvement: Deteksi dan format tabel pajak
+  text = improveTableDetection(text);
+  
+  return text;
+}
+
+// Function untuk improve deteksi tabel pajak
+function improveTableDetection(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const improvedLines: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Deteksi header tabel pajak
+    if (line.includes('PKB') || line.includes('BBNKB') || line.includes('SWDKLLJ')) {
+      // Cari baris dengan angka (kemungkinan data tabel)
+      let j = i;
+      while (j < lines.length && j < i + 20) { // Maksimal 20 baris ke bawah
+        const nextLine = lines[j].trim();
+        
+        // Deteksi baris dengan nama kasir dan angka
+        if (nextLine.match(/^[A-Z\s]+[0-9,\.]+/)) {
+          improvedLines.push(nextLine);
+        }
+        // Deteksi baris dengan format: Nama | Angka | Angka | Angka
+        else if (nextLine.includes('|') && nextLine.match(/[0-9,\.]/)) {
+          improvedLines.push(nextLine);
+        }
+        // Deteksi baris dengan angka saja (subtotal)
+        else if (nextLine.match(/^[0-9,\.\s]+$/)) {
+          improvedLines.push(nextLine);
+        }
+        
+        j++;
+      }
+      i = j - 1; // Skip ke baris terakhir yang diproses
+    } else {
+      improvedLines.push(line);
+    }
+  }
+  
+  return improvedLines.join('\n');
 }
 
 export async function POST(req: Request) {
