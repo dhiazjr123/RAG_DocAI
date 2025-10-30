@@ -10,6 +10,25 @@
 This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
 Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
 
+## Setup for PDF Parsing with Pdfplumber
+
+### Python Dependencies
+
+This project uses **pdfplumber** for enhanced PDF table extraction. Install the Python dependencies:
+
+```bash
+cd scripts
+pip install -r requirements.txt
+```
+
+The project will automatically use pdfplumber if available, otherwise falls back to PDF.js.
+
+### Features
+
+- **Pdfplumber**: Better extraction of tables and structured data from PDFs
+- **PDF.js**: Fallback client-side parsing for browsers
+- **Docling**: Advanced document parsing for complex documents
+
 ## Deployment
 
 Your project is live at:

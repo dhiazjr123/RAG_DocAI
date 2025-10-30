@@ -29,9 +29,15 @@ function extractJenisDanSub(query: string) {
     /bbnkb\b/.test(q) ? "bbnkb1" :
     /swdkllj/.test(q) ? "swdkllj" : "pkb";
 
-  const sub =
-    /denda/.test(q) ? "denda" :
-    /pokok/.test(q) ? "pokok" : "jumlah";
+  // Deteksi apakah user meminta jumlah/total (berbeda dengan kolom jumlah)
+  const memintaJumlah = /(total|jumlah|seluruh|kumulatif|sum|semua)/.test(q) && !/\bdenda\b/.test(q) && !/\bpokok\b/.test(q);
+  const memintaDenda = /\bdenda\b/.test(q);
+  const memintaPokok = /\bpokok\b/.test(q);
+
+  // Prioritaskan: denda > pokok > jumlah
+  const sub = memintaDenda ? "denda" :
+               memintaPokok ? "pokok" :
+               memintaJumlah ? "jumlah" : "jumlah"; // default ke jumlah jika tidak spesifik
 
   return { jenis, sub };
 }
@@ -103,10 +109,14 @@ export async function POST(req: Request) {
     const sysPrompt =
       `Anda asisten RAG untuk tabel pajak daerah.
 ATURAN KERAS:
-- Jika pengguna menyebut PKB/BBNKB I/BBNKB II/SWDKLLJ, jawab HANYA dari kolom tersebut.
-- Jika menyebut "pokok/denda/jumlah", ambil sub-kolom tepatnya.
+- Jika pengguna menanyakan suatu kolom spesifik (pokok/denda/jumlah), jawab HANYA nilai dari kolom tersebut. JANGAN menjumlahkan atau menggabungkan dengan kolom lain.
+- Jika pengguna menanyakan "denda", berikan nilai denda saja. JANGAN menjumlahkan dengan pokok.
+- Jika pengguna menanyakan "pokok", berikan nilai pokok saja.
+- Jika pengguna menanyakan "jumlah" atau meminta TOTAL, barulah berikan jumlah (pokok + denda).
+- JANGAN melakukan perhitungan tambahan atau interpretasi sendiri.
+- Jika pengguna menyebut PKB/BBNKB I/BBNKB II/SWDKLLJ, ambil dari kolom tersebut saja.
+- Format angka dalam Rupiah (id-ID). Jawaban singkat, tepat, dan sesuai permintaan pengguna.
 - Jika data tidak ada di konteks, jawab: "Tidak ditemukan di dokumen." Tanpa spekulasi.
-- Format angka dalam Rupiah (id-ID). Jawaban singkat dan tepat.
 === KONTEN KONTEKS MULAI ===
 ${limitedContext}
 === KONTEN KONTEKS SELESAI ===`;
@@ -175,7 +185,18 @@ ${limitedContext}
           const answer = data?.choices?.[0]?.message?.content || "Tidak ditemukan di dokumen.";
           return NextResponse.json({ answer, sources: [] });
         }
-        const msg = data?.error?.message || `Groq error (${resp.status})`;
+        
+        // Check for rate limit error
+        const errorMsg = data?.error?.message || "";
+        if (errorMsg.includes("rate limit") || errorMsg.includes("Rate limit")) {
+          console.log("Groq rate limit hit, returning helpful message");
+          return NextResponse.json({ 
+            answer: "Maaf, sistem sedang sibuk. Silakan coba lagi dalam beberapa detik. (Rate limit Groq tercapai)",
+            sources: [] 
+          });
+        }
+        
+        const msg = errorMsg || `Groq error (${resp.status})`;
         return NextResponse.json({ error: msg }, { status: 500 });
       } catch (e: any) {
         return NextResponse.json({ error: `Groq error: ${e.message}` }, { status: 500 });

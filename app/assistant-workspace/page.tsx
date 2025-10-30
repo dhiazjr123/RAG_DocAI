@@ -1,7 +1,6 @@
 // app/assistant-workspace/page.tsx
 "use client";
 
-import { Header } from "@/components/header";
 import { DocumentsProvider } from "@/components/documents-context";
 import AssistantWorkspace from "@/components/assistant-workspace";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,6 @@ export default function AssistantWorkspacePage() {
   return (
     <DocumentsProvider>
       <div className="min-h-screen page-gradient">
-        <Header />
         {/* Bar aksi */}
         <div className="w-full px-4 md:px-6 pt-3">
           <Button variant="default" size="sm" onClick={() => router.push("/")} className="gap-2 btn-gradient">

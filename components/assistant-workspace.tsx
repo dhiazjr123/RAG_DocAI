@@ -86,10 +86,27 @@ async function autoIngest(
 ) {
   let blocks: ParsedBlock[] = [];
   const isPdf = file.type?.includes("pdf") || file.name?.toLowerCase().endsWith(".pdf");
+  
   if (isPdf) {
-    // Parse PDF entirely on the client to avoid server worker/module issues
-    const text = await parsePdfInBrowser(file);
-    blocks = splitToBlocksClient(text);
+    // Parse PDF using pdfplumber via API (better table extraction)
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/pdf/parse", { method: "POST", body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.text) {
+        blocks = splitToBlocksClient(d.text);
+      } else {
+        // Fallback to client-side parsing
+        const text = await parsePdfInBrowser(file);
+        blocks = splitToBlocksClient(text);
+      }
+    } catch (error) {
+      // Fallback to client-side parsing if pdfplumber fails
+      console.warn("Pdfplumber failed, using PDF.js fallback:", error);
+      const text = await parsePdfInBrowser(file);
+      blocks = splitToBlocksClient(text);
+    }
   } else {
     const fd = new FormData();
     fd.append("file", file);
@@ -353,7 +370,7 @@ export default function AssistantWorkspace() {
       <div className="border-b border-border bg-card/70 glass soft-shadow">
         <div className="flex h-16 items-center justify-between px-6">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-gradient">AI Assistant Workspace</h1>
+            <h1 className="text-xl font-semibold text-gradient">Document AI Assistant</h1>
           </div>
         </div>
       </div>
@@ -469,9 +486,9 @@ export default function AssistantWorkspace() {
             {msgs.length === 0 ? (
               <div className="text-sm text-muted-foreground text-center py-8">
                 <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>Selamat datang! Anda bisa:</p>
-                <p>• Upload dokumen di panel "Sumber" untuk chat dengan konteks</p>
-                <p>• Atau langsung tanyakan apapun di sini</p>
+                <p>Halo! Bagaimana saya dapat membantu Anda hari ini?</p>
+                <p className="mt-2 text-xs opacity-75">• Upload dokumen di panel "Sumber" untuk chat dengan konteks</p>
+                <p className="text-xs opacity-75">• Atau langsung tanyakan apapun di sini</p>
               </div>
             ) : (
               msgs.map((m) => (
