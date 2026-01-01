@@ -242,13 +242,22 @@ export default function AssistantWorkspace() {
   /** Upload → auto-ingest (seperti NotebookLM: tambah sumber langsung diproses) */
   const onUpload = async (files: File[]) => {
     if (!files.length) return;
+    
+    // Tambahkan semua file ke documents context
     addFromFiles(files);
+    
+    // Tunggu sebentar untuk memastikan state ter-update
+    await wait(100);
 
-    for (const file of files) {
+    // Proses semua file secara paralel untuk efisiensi
+    const parsePromises = files.map(async (file) => {
       try {
-        const doc = await findDocByFile(() => documents as DocItem[], file);
-        if (!doc || !doc.id) continue;
-        setCurrentId(doc.id);
+        // Cari dokumen yang baru ditambahkan
+        const doc = await findDocByFile(() => documents as DocItem[], file, 30, 100);
+        if (!doc || !doc.id) {
+          console.warn(`Document not found for file: ${file.name}`);
+          return;
+        }
         
         // Auto-parse in background
         addNotification('success', `Memulai parsing ${file.name}...`);
@@ -256,6 +265,18 @@ export default function AssistantWorkspace() {
         addNotification('success', `✅ ${file.name} berhasil diparsing!`);
       } catch (e: any) {
         addNotification('error', `❌ Gagal parsing ${file.name}: ${e.message || "Unknown error"}`);
+        console.error(`Failed to parse ${file.name}:`, e);
+      }
+    });
+
+    // Tunggu semua parsing selesai
+    await Promise.all(parsePromises);
+    
+    // Set currentId ke dokumen pertama jika belum ada
+    if (!currentId && documents.length > 0) {
+      const firstDoc = documents.find(d => d.id);
+      if (firstDoc) {
+        setCurrentId(firstDoc.id);
       }
     }
   };
@@ -285,7 +306,7 @@ export default function AssistantWorkspace() {
     }
   };
 
-  /** Chat — kalau belum ada parse untuk doc aktif, parse dulu diam-diam */
+  /** Chat — menggunakan semua dokumen yang sudah diparsing */
   const sendChat = async () => {
     const text = input.trim();
     if (!text) return;
@@ -296,27 +317,80 @@ export default function AssistantWorkspace() {
     setInput("");
 
     try {
-      const docId = currentId || documents[0]?.id || null;
-      const docFile = docId ? (documents.find((d) => d.id === docId)?.file as File | undefined) : undefined;
+      // Pastikan semua dokumen yang sudah di-upload sudah diparsing
+      const docsToParse: Array<{ doc: DocItem; file: File }> = [];
+      for (const doc of documents) {
+        if (!doc.file) continue;
+        const existingBlocks = parsedById[doc.id] ?? [];
+        if (existingBlocks.length === 0) {
+          docsToParse.push({ doc, file: doc.file });
+        }
+      }
 
-      let blocks = docId ? parsedById[docId] ?? [] : [];
-      if ((!blocks || blocks.length === 0) && docId && docFile) {
+      // Parse dokumen yang belum diparsing
+      if (docsToParse.length > 0) {
         setIsParsing(true);
-        blocks = await autoIngest(docFile, docId, setParsedById, setOpenBlocks);
+        for (const { doc, file } of docsToParse) {
+          try {
+            await autoIngest(file, doc.id, setParsedById, setOpenBlocks);
+          } catch (e: any) {
+            console.warn(`Failed to parse ${doc.name}:`, e);
+          }
+        }
         setIsParsing(false);
       }
 
-      // Heuristic answer for average UTS/UAS
-      const avgAnswer = tryAnswerAverageQuery(text, blocks);
+      // Kumpulkan blocks dari SEMUA dokumen yang sudah diparsing
+      const allBlocks: Array<{ docId: string; docName: string; block: ParsedBlock }> = [];
+      for (const doc of documents) {
+        const blocks = parsedById[doc.id] ?? [];
+        if (blocks.length > 0) {
+          blocks.forEach((block) => {
+            allBlocks.push({
+              docId: doc.id,
+              docName: doc.name,
+              block,
+            });
+          });
+        }
+      }
+
+      // Jika tidak ada dokumen yang sudah diparsing, coba parse dokumen pertama
+      if (allBlocks.length === 0 && documents.length > 0) {
+        const firstDoc = documents[0];
+        if (firstDoc?.file) {
+          setIsParsing(true);
+          try {
+            const blocks = await autoIngest(firstDoc.file, firstDoc.id, setParsedById, setOpenBlocks);
+            blocks.forEach((block) => {
+              allBlocks.push({
+                docId: firstDoc.id,
+                docName: firstDoc.name,
+                block,
+              });
+            });
+          } catch (e: any) {
+            console.warn(`Failed to parse first document:`, e);
+          }
+          setIsParsing(false);
+        }
+      }
+
+      // Heuristic answer for average UTS/UAS (gunakan semua blocks)
+      const flatBlocks = allBlocks.map((b) => b.block);
+      const avgAnswer = tryAnswerAverageQuery(text, flatBlocks);
       if (avgAnswer) {
         setMsgs((m) => [...m, { id: `${id}-a`, role: "assistant", text: avgAnswer }]);
         return;
       }
 
+      // Gabungkan context dari semua dokumen dengan identifier dokumen
       const context =
-        (blocks ?? [])
-          .map((b) => `[${b.label}] ${b.content}`)
-          .join("\n\n") || "(no context)";
+        allBlocks.length > 0
+          ? allBlocks
+              .map(({ docName, block }) => `[Dokumen: ${docName} - ${block.label}]\n${block.content}`)
+              .join("\n\n---\n\n")
+          : "(no context - tidak ada dokumen yang sudah diparsing)";
 
       const res = await fetch("/api/rag/query", {
         method: "POST",

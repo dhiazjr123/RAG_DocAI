@@ -44,13 +44,13 @@ export function Header() {
           <Badge variant="secondary" className="text-xs">Enterprise Department</Badge>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="ring-ambient"><HelpCircle className="h-4 w-4" /></Button>
-            <Button variant="default" size="sm" className="ring-ambient btn-gradient" onClick={onLogout}>
+            <Button variant="ghost" size="sm" className="ring-ambient icon-press"><HelpCircle className="h-4 w-4" /></Button>
+            <Button variant="default" size="sm" className="ring-ambient btn-gradient btn-press" onClick={onLogout}>
               <LogOut className="h-4 w-4 mr-2" /> Logout
             </Button>
             <div className="relative" ref={menuRef}>
               <button
-                className="rounded-full focus:outline-none"
+                className="rounded-full focus:outline-none icon-press"
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)}
@@ -63,13 +63,13 @@ export function Header() {
               {menuOpen && (
                 <div className="absolute right-0 mt-2 w-40 bg-popover border border-border rounded-md shadow-md z-[90]">
                   <button
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60 icon-press"
                     onClick={() => { setMenuOpen(false); router.push("/profile"); }}
                   >
                     <User2 className="h-4 w-4" /> Profile
                   </button>
                   <button
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60 icon-press"
                     onClick={() => { setMenuOpen(false); router.push("/setting"); }}
                   >
                     <Settings className="h-4 w-4" /> Setting

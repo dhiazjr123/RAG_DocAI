@@ -94,72 +94,63 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen grid grid-cols-1 md:grid-cols-2">
-      {/* Kiri: RAG Document AI Illustration - Full Column */}
-      <div className="hidden md:flex items-center justify-center bg-gradient-to-br from-primary/10 via-accent/5 to-background relative overflow-hidden p-8">
-        {/* Background Pattern */}
-        <div className="absolute inset-0 opacity-5">
-          <div className="absolute top-10 left-10 w-32 h-32 border-2 border-primary/20 rounded-lg rotate-12"></div>
-          <div className="absolute top-32 right-16 w-24 h-24 border-2 border-accent/20 rounded-lg -rotate-12"></div>
-          <div className="absolute bottom-20 left-20 w-28 h-28 border-2 border-primary/20 rounded-lg rotate-45"></div>
-          <div className="absolute bottom-32 right-10 w-20 h-20 border-2 border-accent/20 rounded-lg -rotate-45"></div>
-        </div>
-        
-        {/* AI Brain Icon */}
-        <div className="absolute top-16 left-16">
-          <div className="w-20 h-20 bg-gradient-to-br from-primary to-accent rounded-full flex items-center justify-center shadow-2xl">
-            <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-            </svg>
+      {/* Kiri: illustration */}
+      <div className="hidden md:flex items-center justify-center relative overflow-hidden p-10 bg-gradient-to-br from-[#0b0c1a] via-[#0d1024] to-[#0b0c1a]">
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(80,99,255,0.15),transparent_35%),radial-gradient(circle_at_80%_30%,rgba(99,102,241,0.18),transparent_32%),radial-gradient(circle_at_30%_80%,rgba(56,189,248,0.14),transparent_30%)]" />
+
+        <Image
+          src="/3.png"
+          alt="Brain document icon"
+          width={150}
+          height={150}
+          className="absolute top-6 left-6 w-28 h-28 object-contain drop-shadow-xl"
+          priority
+        />
+        <Image
+          src="/2.png"
+          alt="Search document icon"
+          width={170}
+          height={170}
+          className="absolute top-10 right-10 w-32 h-32 object-contain drop-shadow-xl"
+          priority
+        />
+        <Image
+          src="/4.png"
+          alt="Book to brain icon"
+          width={170}
+          height={170}
+          className="absolute bottom-14 left-10 w-32 h-32 object-contain drop-shadow-lg"
+          priority
+        />
+        <Image
+          src="/1.png"
+          alt="Flow icon"
+          width={190}
+          height={190}
+          className="absolute bottom-10 right-10 w-40 h-40 object-contain drop-shadow-lg"
+          priority
+        />
+
+        <div className="text-center z-10 space-y-4">
+          <div className="flex items-center justify-center gap-3">
+            <span className="h-2.5 w-2.5 rounded-full bg-primary/80"></span>
+            <span className="h-1 w-16 rounded-full bg-primary/60"></span>
+            <span className="h-2.5 w-2.5 rounded-full bg-muted"></span>
+            <span className="h-1 w-16 rounded-full bg-primary/60"></span>
+            <span className="h-2.5 w-2.5 rounded-full bg-primary/80"></span>
           </div>
-        </div>
-        
-        {/* Document Icons - Scattered */}
-        <div className="absolute top-24 right-20">
-          <div className="w-16 h-20 bg-white/90 rounded-lg shadow-lg flex items-center justify-center transform rotate-12 hover:rotate-0 transition-transform duration-500">
-            <svg className="w-8 h-8 text-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-            </svg>
-          </div>
-        </div>
-        
-        <div className="absolute bottom-32 left-20">
-          <div className="w-14 h-18 bg-white/90 rounded-lg shadow-lg flex items-center justify-center transform -rotate-6 hover:rotate-0 transition-transform duration-500">
-            <svg className="w-7 h-7 text-accent" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-            </svg>
-          </div>
-        </div>
-        
-        <div className="absolute bottom-20 right-16">
-          <div className="w-12 h-16 bg-white/90 rounded-lg shadow-lg flex items-center justify-center transform rotate-8 hover:rotate-0 transition-transform duration-500">
-            <svg className="w-6 h-6 text-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-            </svg>
-          </div>
-        </div>
-        
-        {/* Connection Lines - Dynamic */}
-        <div className="absolute top-32 left-1/2 transform -translate-x-1/2">
-          <div className="flex items-center space-x-4">
-            <div className="w-3 h-3 bg-primary rounded-full animate-pulse"></div>
-            <div className="w-16 h-1 bg-gradient-to-r from-primary to-accent rounded-full"></div>
-            <div className="w-3 h-3 bg-accent rounded-full animate-pulse"></div>
-            <div className="w-16 h-1 bg-gradient-to-r from-accent to-primary rounded-full"></div>
-            <div className="w-3 h-3 bg-primary rounded-full animate-pulse"></div>
-          </div>
-        </div>
-        
-        {/* Main Text - Centered */}
-        <div className="text-center z-10">
-          <h2 className="text-4xl font-bold mb-4" style={{
-            background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)',
-            WebkitBackgroundClip: 'text',
-            backgroundClip: 'text',
-            color: 'transparent'
-          }}>RAG Document AI</h2>
-          <p className="text-lg text-muted-foreground leading-relaxed max-w-md">
-            Upload dokumen, analisis dengan AI, dan dapatkan jawaban yang akurat dari konten Anda
-          </p>
+          <h2
+            className="text-4xl font-bold"
+            style={{
+              background:
+                "linear-gradient(135deg, #6ea0ff 0%, #5372ff 50%, #6ad0ff 100%)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
+            RAG Dokumen AI
+          </h2>
         </div>
       </div>
 
@@ -246,7 +237,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-md btn-gradient py-2 text-sm font-medium hover:brightness-105 disabled:opacity-60"
+              className="w-full rounded-md btn-gradient btn-press py-2 text-sm font-medium hover:brightness-105 disabled:opacity-60"
             >
               {loading ? "Signing in..." : "Log In"}
             </button>

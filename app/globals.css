@@ -258,6 +258,32 @@
     box-shadow: var(--shadow-lg);
   }
 
+  /* Interactive buttons */
+  .btn-press {
+    transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, filter 0.15s ease-out;
+    transform-origin: center;
+  }
+  .btn-press:hover {
+    transform: translateY(-1px) scale(1.02);
+    box-shadow: var(--shadow-md);
+  }
+  .btn-press:active {
+    transform: translateY(1px) scale(0.97);
+    box-shadow: var(--shadow-sm);
+    filter: brightness(0.97);
+  }
+
+  .icon-press {
+    transition: transform 0.12s ease-out, background-color 0.12s ease-out;
+    transform-origin: center;
+  }
+  .icon-press:hover {
+    transform: scale(1.05);
+  }
+  .icon-press:active {
+    transform: scale(0.9);
+  }
+  
   /* Tombol gradasi brand */
   .btn-gradient {
     background-image: linear-gradient(

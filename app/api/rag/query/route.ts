@@ -1,6 +1,6 @@
 // app/api/rag/query/route.ts
 import { NextResponse } from "next/server";
-import { parseTableFromText, findRowByName } from "@/lib/parse-yogyakarta-pajak";
+import { parseTableFromText, findRowByName, findSubtotalPKB, findSubtotalBBNKB, findTotalGabungan } from "@/lib/parse-yogyakarta-pajak";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,7 +70,50 @@ export async function POST(req: Request) {
     const rows = parseTableFromText(limitedContext);
     const { jenis, sub } = extractJenisDanSub(query);
     const namaReq = extractNama(query);
+    const q = normalize(query);
 
+    // Deteksi query tentang total/subtotal
+    const isQueryTotalPKB = /total\s*penerimaan\s*pkb/i.test(q) && !/bbnkb|bbn-kb/i.test(q);
+    const isQueryTotalBBNKB = /total\s*penerimaan\s*bbnkb|total\s*penerimaan\s*bbn-kb/i.test(q);
+    const isQueryTotalGabungan = /total\s*penerimaan\s*pkb\s*bbnkb|total\s*penerimaan\s*pkb\s*bbn-kb|total\s*penerimaan\s*(pkb\s*)?(dan\s*)?bbnkb/i.test(q);
+
+    // Handle query tentang subtotal/total
+    if (isQueryTotalPKB && !isQueryTotalGabungan) {
+      // Query tentang SUB TOTAL PKB saja (bukan gabungan)
+      const subtotalPKB = findSubtotalPKB(rows);
+      if (subtotalPKB && subtotalPKB.pkb_jumlah > 0) {
+        return NextResponse.json({ 
+          answer: `Total Penerimaan PKB: ${rupiah(subtotalPKB.pkb_jumlah)}.`, 
+          sources: [] 
+        });
+      }
+    } else if (isQueryTotalBBNKB) {
+      // Query tentang SUB TOTAL BBNKB
+      const subtotalBBNKB = findSubtotalBBNKB(rows);
+      if (subtotalBBNKB && subtotalBBNKB.bbnkb1_jumlah > 0) {
+        return NextResponse.json({ 
+          answer: `Total Penerimaan BBNKB: ${rupiah(subtotalBBNKB.bbnkb1_jumlah)}.`, 
+          sources: [] 
+        });
+      }
+    } else if (isQueryTotalGabungan) {
+      // Query tentang TOTAL PENERIMAAN PKB BBNK-KB (gabungan)
+      const totalGabungan = findTotalGabungan(rows);
+      if (totalGabungan) {
+        // Coba ambil dari baris total gabungan, atau hitung dari subtotal
+        const subtotalPKB = findSubtotalPKB(rows);
+        const subtotalBBNKB = findSubtotalBBNKB(rows);
+        if (subtotalPKB && subtotalBBNKB) {
+          const total = subtotalPKB.pkb_jumlah + subtotalBBNKB.bbnkb1_jumlah;
+          return NextResponse.json({ 
+            answer: `Total Penerimaan PKB BBNK-KB (A+B): ${rupiah(total)}.`, 
+            sources: [] 
+          });
+        }
+      }
+    }
+
+    // Handle query dengan nama kasir/kppd
     if (rows.length && namaReq) {
       const row = findRowByName(rows, namaReq);
       if (row) {
@@ -113,6 +156,10 @@ ATURAN KERAS:
 - Jika pengguna menanyakan "denda", berikan nilai denda saja. JANGAN menjumlahkan dengan pokok.
 - Jika pengguna menanyakan "pokok", berikan nilai pokok saja.
 - Jika pengguna menanyakan "jumlah" atau meminta TOTAL, barulah berikan jumlah (pokok + denda).
+- PENTING: Bedakan antara "SUB TOTAL PKB" dan "TOTAL PENERIMAAN PKB BBNK-KB":
+  * "SUB TOTAL PKB" atau "Total Penerimaan PKB" (tanpa menyebut BBNKB) = hanya total PKB saja (biasanya sekitar 334.549.300)
+  * "TOTAL PENERIMAAN PKB BBNK-KB" atau "Total Penerimaan PKB dan BBNKB" = gabungan PKB + BBNKB (biasanya sekitar 509.011.800)
+  * Jika user bertanya "total penerimaan PKB" tanpa menyebut BBNKB, gunakan SUB TOTAL PKB, BUKAN total gabungan.
 - JANGAN melakukan perhitungan tambahan atau interpretasi sendiri.
 - Jika pengguna menyebut PKB/BBNKB I/BBNKB II/SWDKLLJ, ambil dari kolom tersebut saja.
 - Format angka dalam Rupiah (id-ID). Jawaban singkat, tepat, dan sesuai permintaan pengguna.

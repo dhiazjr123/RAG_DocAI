@@ -5,10 +5,8 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, MessageSquare, Clock, Download, Trash2, TrendingUp, Filter } from "lucide-react";
+import { FileText, MessageSquare, Clock, Trash2, TrendingUp } from "lucide-react";
 import { useDocuments } from "@/components/documents-context";
-import FileUploadButton from "@/components/file-upload-button"; // ⬅️ NEW
-import { cn } from "@/lib/utils";
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts;
@@ -25,11 +23,9 @@ function timeAgo(ts: number) {
 export function MainContent() {
   const {
     documents,
-    removeDocument,
     recentQueries,
     removeQuery,
     clearQueries,
-    addFromFiles,            // ⬅️ NEW
   } = useDocuments();
 
   const summaryStats = useMemo(() => {
@@ -41,16 +37,6 @@ export function MainContent() {
       { label: "Total Queries", value: recentQueries.length.toString(), icon: MessageSquare },
     ];
   }, [documents, recentQueries]);
-
-  const downloadFile = (file?: File) => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <main className="flex-1 p-6 space-y-6 overflow-auto">
@@ -80,7 +66,7 @@ export function MainContent() {
           <Button
             variant="ghost"
             size="sm"
-            className="ring-ambient text-gradient hover:text-foreground"
+            className="ring-ambient text-gradient hover:text-foreground btn-press"
             disabled={recentQueries.length === 0}
             onClick={() => {
               if (recentQueries.length === 0) return;
@@ -124,108 +110,6 @@ export function MainContent() {
         </CardContent>
       </Card>
 
-      {/* Documents Table */}
-      <Card className="bg-card/70 glass soft-shadow hover-card">
-        {/* ⬇️ HEADER BARU: tombol di sisi kanan */}
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Documents
-          </CardTitle>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="default"
-              size="sm"
-              className="justify-start gap-2 btn-gradient border-0 ring-ambient"
-              onClick={() => {
-                // TODO: tampilkan panel filter / modal di sini
-                // sementara hanya placeholder
-              }}
-              aria-label="Filter Documents"
-              title="Filter Documents"
-            >
-              <Filter className="h-4 w-4" />
-              Filter
-            </Button>
-
-            <FileUploadButton
-              onSelectFiles={addFromFiles}
-              label="Upload Document"
-              variant="outline"
-              size="sm"
-              className="gap-2 ring-ambient btn-gradient"
-            />
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <div className="overflow-x-auto table-row-hover">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Name</th>
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Type</th>
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Size</th>
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Upload Date</th>
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="text-left py-3 px-2 text-sm font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.length > 0 ? (
-                  documents.map((doc) => (
-                    <tr key={doc.id} className="border-b border-border/50">
-                      <td className="py-3 px-2 text-sm text-foreground">{doc.name}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant="outline" className="text-xs">{doc.type}</Badge>
-                      </td>
-                      <td className="py-3 px-2 text-sm text-muted-foreground">{doc.size}</td>
-                      <td className="py-3 px-2 text-sm text-muted-foreground">{doc.uploadDate}</td>
-                      <td className="py-3 px-2">
-                        <Badge 
-                          variant={doc.status === "Processed" ? "default" : "secondary"} 
-                          className={cn("text-xs", doc.status === "Processed" && "btn-gradient")}
-                        >
-                          {doc.status}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="ring-ambient"
-                            onClick={() => downloadFile(doc.file)}
-                            disabled={!doc.file}
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="ring-ambient"
-                            onClick={() => removeDocument(doc.id)}
-                            aria-label={`Delete ${doc.name}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                      Belum ada dokumen. Klik <b>Upload Document</b> di atas tabel.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
     </main>
   );
 }

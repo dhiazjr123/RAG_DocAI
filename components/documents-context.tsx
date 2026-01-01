@@ -1,8 +1,10 @@
 // components/documents-context.tsx
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useRef } from "react";
 import { deleteIndexForDocument } from "@/lib/ragLocal";
+import { createClient } from "@/lib/supabase/client";
+import { addActivity } from "@/lib/activity-tracker";
 
 /* ================== Types ================== */
 
@@ -35,8 +37,14 @@ type Ctx = {
 
 /* ================== Keys & helpers ================== */
 
-const LS_DOCS_KEY = "rag_docs_v1";
-const LS_QUERIES_KEY = "rag_recent_queries_v1";
+// Helper untuk membuat localStorage key yang unique per user
+function getLSDocsKey(userId: string | null) {
+  return userId ? `rag_docs_v1_${userId}` : "rag_docs_v1_guest";
+}
+
+function getLSQueriesKey(userId: string | null) {
+  return userId ? `rag_recent_queries_v1_${userId}` : "rag_recent_queries_v1_guest";
+}
 
 type DocMeta = Omit<DocRow, "file">;
 
@@ -68,7 +76,7 @@ function mimeFromExt(extUpper: string) {
 /* ================== IndexedDB (simpel) ================== */
 
 const IDB_NAME = "rag-docs-db";
-const IDB_VERSION = 1;
+const IDB_VERSION = 2; // Increment version untuk upgrade schema
 const STORE_FILES = "files";
 
 function openDB(): Promise<IDBDatabase> {
@@ -77,7 +85,7 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_FILES)) {
-        db.createObjectStore(STORE_FILES); // key = id (string)
+        db.createObjectStore(STORE_FILES); // key = userId:docId (string)
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -85,22 +93,30 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-async function idbPutFile(id: string, blob: Blob) {
+// Helper untuk membuat composite key: userId:docId
+function makeFileKey(userId: string | null, docId: string): string {
+  const uid = userId || "guest";
+  return `${uid}:${docId}`;
+}
+
+async function idbPutFile(userId: string | null, docId: string, blob: Blob) {
   const db = await openDB();
+  const key = makeFileKey(userId, docId);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_FILES, "readwrite");
-    tx.objectStore(STORE_FILES).put(blob, id);
+    tx.objectStore(STORE_FILES).put(blob, key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
   db.close();
 }
 
-async function idbGetFile(id: string): Promise<Blob | undefined> {
+async function idbGetFile(userId: string | null, docId: string): Promise<Blob | undefined> {
   const db = await openDB();
+  const key = makeFileKey(userId, docId);
   const blob = await new Promise<Blob | undefined>((resolve, reject) => {
     const tx = db.transaction(STORE_FILES, "readonly");
-    const req = tx.objectStore(STORE_FILES).get(id);
+    const req = tx.objectStore(STORE_FILES).get(key);
     req.onsuccess = () => resolve(req.result as Blob | undefined);
     req.onerror = () => reject(req.error);
   });
@@ -108,11 +124,12 @@ async function idbGetFile(id: string): Promise<Blob | undefined> {
   return blob;
 }
 
-async function idbDeleteFile(id: string) {
+async function idbDeleteFile(userId: string | null, docId: string) {
   const db = await openDB();
+  const key = makeFileKey(userId, docId);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_FILES, "readwrite");
-    tx.objectStore(STORE_FILES).delete(id);
+    tx.objectStore(STORE_FILES).delete(key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -127,56 +144,102 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
   const [documents, setDocuments] = useState<DocRow[]>([]);
   const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
   const [hydrated, setHydrated] = useState(false); // supaya tidak nulis ke LS saat tahap load
+  const [userId, setUserId] = useState<string | null>(null);
+  const supabase = createClient();
 
-  /* ---------- HYDRATE dari localStorage + IndexedDB ---------- */
+  /* ---------- Get current user ID dari Supabase ---------- */
   useEffect(() => {
     let mounted = true;
     
     (async () => {
       try {
-        console.log("Starting hydration...");
-        
-        // load docs (metadata) dari LS
-        const metaJson = localStorage.getItem(LS_DOCS_KEY);
-        const metas: DocMeta[] = metaJson ? JSON.parse(metaJson) : [];
-        console.log("Loaded metadata:", metas.length, "documents");
+        const { data } = await supabase.auth.getUser();
+        if (mounted) {
+          const uid = data?.user?.id || null;
+          setUserId(uid);
+          console.log("User ID set:", uid);
+        }
+      } catch (e) {
+        console.error("Error getting user:", e);
+        if (mounted) {
+          setUserId(null);
+        }
+      }
+    })();
 
-        // gabungkan dengan file Blob dari IndexedDB
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (mounted) {
+        const uid = session?.user?.id || null;
+        setUserId(uid);
+        console.log("Auth state changed:", event, "New user ID:", uid);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  /* ---------- HYDRATE dari localStorage + IndexedDB (per user) ---------- */
+  useEffect(() => {
+    // Jika belum login → kosongkan state tapi biarkan data di localStorage
+    if (!userId) {
+      console.log("No user logged in, clearing in-memory state but keeping localStorage");
+      setDocuments([]);
+      setRecentQueries([]);
+      setHydrated(false);
+      return;
+    }
+
+    setHydrated(false);
+    
+    let mounted = true;
+
+    (async () => {
+      try {
+        console.log("Hydrating documents/queries for user:", userId);
+
+        const docsKey = getLSDocsKey(userId);
+        const queriesKey = getLSQueriesKey(userId);
+
+        const metaJson = localStorage.getItem(docsKey);
+        const metas: DocMeta[] = metaJson ? JSON.parse(metaJson) : [];
+        console.log("Loaded metadata from LS:", metas.length, "documents");
+
         const restored: DocRow[] = await Promise.all(
           metas.map(async (m) => {
             let file: File | undefined;
             try {
-              const blob = await idbGetFile(m.id);
+              const blob = await idbGetFile(userId, m.id);
               if (blob) {
                 file = new File([blob], m.name, { type: mimeFromExt(m.type) });
               }
             } catch (error) {
               console.warn("Failed to load file from IndexedDB:", m.id, error);
-              // jika gagal ambil file, biarkan undefined
             }
             return { ...m, file };
           }),
         );
-        
-        if (mounted) {
-          setDocuments(restored);
-          console.log("Documents restored:", restored.length);
-        }
 
-        // load recent queries
-        const rqJson = localStorage.getItem(LS_QUERIES_KEY);
+        if (!mounted) return;
+
+        setDocuments(restored);
+        console.log("Documents restored:", restored.length);
+
+        const rqJson = localStorage.getItem(queriesKey);
         const rq: RecentQuery[] = rqJson ? JSON.parse(rqJson) : [];
-        
-        if (mounted) {
-          setRecentQueries(rq);
-          console.log("Queries restored:", rq.length);
-        }
+        if (!mounted) return;
+
+        setRecentQueries(rq);
+        console.log("Queries restored:", rq.length);
       } catch (e) {
         console.error("Gagal hydrate:", e);
       } finally {
         if (mounted) {
-          console.log("Hydration completed");
           setHydrated(true);
+          console.log("Hydration completed for user:", userId);
         }
       }
     })();
@@ -184,19 +247,27 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [userId]);
 
-  /* ---------- Persist otomatis saat state berubah ---------- */
+  /* ---------- Persist otomatis saat state berubah (per user) ---------- */
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || userId === null) return; // Skip if not hydrated or no user
+
     const metas: DocMeta[] = documents.map(({ file, ...meta }) => meta);
-    localStorage.setItem(LS_DOCS_KEY, JSON.stringify(metas));
-  }, [documents, hydrated]);
+    const docsKey = getLSDocsKey(userId);
+
+    localStorage.setItem(docsKey, JSON.stringify(metas));
+    console.log("Saved documents to localStorage:", docsKey, metas.length);
+  }, [documents, hydrated, userId]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    localStorage.setItem(LS_QUERIES_KEY, JSON.stringify(recentQueries));
-  }, [recentQueries, hydrated]);
+    if (!hydrated || userId === null) return; // Skip if not hydrated or no user
+
+    const queriesKey = getLSQueriesKey(userId);
+
+    localStorage.setItem(queriesKey, JSON.stringify(recentQueries));
+    console.log("Saved queries to localStorage:", queriesKey, recentQueries.length);
+  }, [recentQueries, hydrated, userId]);
 
   /* ---------- Actions ---------- */
 
@@ -222,24 +293,33 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     // update UI dulu
     setDocuments((prev) => [...rows, ...prev]);
 
-    // simpan file ke IndexedDB (async)
+    // simpan file ke IndexedDB (async) dengan userId
     rows.forEach((r) => {
       if (r.file) {
-        idbPutFile(r.id, r.file).catch((e) => console.error("Gagal simpan file ke IDB:", e));
+        idbPutFile(userId, r.id, r.file).catch((e) => console.error("Gagal simpan file ke IDB:", e));
       }
     });
 
     // simulasi selesai proses
     setTimeout(() => {
       setDocuments((prev) =>
-        prev.map((d) => (rows.some((r) => r.id === d.id) ? { ...d, status: "Processed" } : d)),
+        prev.map((d) => {
+          if (rows.some((r) => r.id === d.id) && d.status === "Processing") {
+            // Track activity when document is processed (only once when status changes)
+            addActivity(userId, "document_processed", `Processed document "${d.name}"`, {
+              documentName: d.name,
+            });
+            return { ...d, status: "Processed" };
+          }
+          return d;
+        }),
       );
     }, 1200);
   };
 
   const removeDocument = (id: string) => {
     setDocuments((prev) => prev.filter((d) => d.id !== id));
-    idbDeleteFile(id).catch((e) => console.error("Gagal hapus file di IDB:", e));
+    idbDeleteFile(userId, id).catch((e) => console.error("Gagal hapus file di IDB:", e));
     deleteIndexForDocument(id).catch((e) => console.error("Gagal hapus index RAG:", e));
   };
 
@@ -253,6 +333,12 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
       at: Date.now(),
     };
     setRecentQueries((prev) => [q, ...prev].slice(0, 50)); // simpan maksimal 50
+    
+    // Track activity
+    const queryPreview = text.length > 50 ? text.substring(0, 50) + "..." : text;
+    addActivity(userId, "query_made", `Asked query about "${queryPreview}"`, {
+      queryText: text,
+    });
   };
 
   const removeQuery = (id: string) => {

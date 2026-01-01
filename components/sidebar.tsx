@@ -12,7 +12,7 @@ export default function Sidebar() {                    // ⬅️ export default
   const menu = [
     { href: "/assistant-workspace", label: "AI Assistant", icon: Bot },
     { href: "/", label: "Overview", icon: BarChart3 },
-    { href: "/#documents", label: "Documents", icon: FileText },
+    { href: "/documents", label: "Kelola Dokumen", icon: FileText },
   ];
 
   return (
@@ -20,13 +20,13 @@ export default function Sidebar() {                    // ⬅️ export default
       <div className="p-4">
         <nav className="space-y-2">
           {menu.map((m) => {
-            const active = pathname === m.href || (m.href === "/#documents" && pathname === "/");
+            const active = pathname === m.href;
             const Icon = m.icon;
             return (
               <Link key={m.href} href={m.href} className="block">
                 <Button
                   variant={active ? "default" : "ghost"}
-                  className={cn("w-full justify-start gap-2", active && "btn-gradient")}
+                  className={cn("w-full justify-start gap-2 btn-press", active && "btn-gradient")}
                 >
                   <Icon className="h-4 w-4" />
                   {m.label}
