@@ -51,13 +51,43 @@ function extractNama(query: string) {
 
 export async function POST(req: Request) {
   try {
-    const { query, context } = await req.json();
+    const { query, context, metadata } = await req.json();
     if (!query) {
       return NextResponse.json({ error: "Query kosong." }, { status: 400 });
     }
 
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
+
+    // Deteksi query tentang jumlah dokumen (harus spesifik tentang dokumen/file, bukan data dalam dokumen)
+    const q = normalize(query);
+    const queryLower = query.toLowerCase();
+    const isQueryDocumentCount = /(berapa|berapa\s+banyak|jumlah|total|ada\s+berapa)\s+(dokumen|file|document)/i.test(queryLower) || 
+                                 /(dokumen|file|document)\s+(berapa|berapa\s+banyak|jumlah|total|ada)/i.test(queryLower) ||
+                                 /(berapa|berapa\s+banyak)\s+(dokumen|file|document)\s+(yang|sudah|telah)/i.test(queryLower);
+
+    // Jika query tentang jumlah dokumen, kembalikan jawaban deterministik
+    if (isQueryDocumentCount && metadata) {
+      const { documentCount, totalDocuments } = metadata;
+      // Gunakan totalDocuments (jumlah dokumen yang benar-benar ada di state) sebagai sumber kebenaran
+      const actualCount = totalDocuments !== undefined ? totalDocuments : (documentCount || 0);
+      if (actualCount === 0) {
+        return NextResponse.json({ 
+          answer: "Belum ada dokumen yang diproses. Silakan upload dokumen terlebih dahulu.", 
+          sources: [] 
+        });
+      } else if (actualCount === 1) {
+        return NextResponse.json({ 
+          answer: `Terdapat 1 dokumen yang sudah diproses.`, 
+          sources: [] 
+        });
+      } else {
+        return NextResponse.json({ 
+          answer: `Terdapat ${actualCount} dokumen yang sudah diproses.`, 
+          sources: [] 
+        });
+      }
+    }
 
     // === batasi context
     const MAX_CONTEXT_CHARS = 25000;
@@ -70,7 +100,6 @@ export async function POST(req: Request) {
     const rows = parseTableFromText(limitedContext);
     const { jenis, sub } = extractJenisDanSub(query);
     const namaReq = extractNama(query);
-    const q = normalize(query);
 
     // Deteksi query tentang total/subtotal
     const isQueryTotalPKB = /total\s*penerimaan\s*pkb/i.test(q) && !/bbnkb|bbn-kb/i.test(q);

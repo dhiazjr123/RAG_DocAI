@@ -384,18 +384,45 @@ export default function AssistantWorkspace() {
         return;
       }
 
-      // Gabungkan context dari semua dokumen dengan identifier dokumen
+      // Gabungkan context dari semua dokumen dengan identifier dokumen yang lebih jelas
+      // Kelompokkan blocks per dokumen untuk struktur yang lebih jelas
+      const contextByDoc: Record<string, Array<{ docName: string; block: ParsedBlock }>> = {};
+      allBlocks.forEach(({ docName, block }) => {
+        if (!contextByDoc[docName]) {
+          contextByDoc[docName] = [];
+        }
+        contextByDoc[docName].push({ docName, block });
+      });
+
       const context =
         allBlocks.length > 0
-          ? allBlocks
-              .map(({ docName, block }) => `[Dokumen: ${docName} - ${block.label}]\n${block.content}`)
-              .join("\n\n---\n\n")
+          ? Object.entries(contextByDoc)
+              .map(([docName, blocks]) => {
+                const docHeader = `=== DOKUMEN: ${docName} ===`;
+                const docContent = blocks
+                  .map(({ block }) => `[Bagian: ${block.label}]\n${block.content}`)
+                  .join("\n\n");
+                return `${docHeader}\n${docContent}`;
+              })
+              .join("\n\n" + "=".repeat(50) + "\n\n")
           : "(no context - tidak ada dokumen yang sudah diparsing)";
+
+      // Gunakan jumlah dokumen yang benar-benar ada di state sebagai sumber kebenaran
+      // Jangan gunakan uniqueDocNames dari retrieval karena bisa termasuk dokumen lama
+      const totalDocuments = documents.length;
+      const documentCount = totalDocuments; // Gunakan totalDocuments sebagai documentCount juga
 
       const res = await fetch("/api/rag/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text, context }),
+        body: JSON.stringify({ 
+          query: text, 
+          context,
+          metadata: {
+            documentCount: documentCount,
+            totalDocuments: totalDocuments,
+          }
+        }),
       });
 
       const d = await res.json().catch(() => ({}));
@@ -469,7 +496,7 @@ export default function AssistantWorkspace() {
             ))}
           </div>
         )}
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
 
         {/* ========== SUMBER (kiri) ========== */}
@@ -706,7 +733,7 @@ export default function AssistantWorkspace() {
           </Card>
         </div>
       </div>
-    </main>
+      </main>
     </div>
   );
 }
