@@ -1,24 +1,68 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play
+  Send, Bot, User, FileText, Download, Copy, Check, ChevronDown, ChevronRight, Play, FileUp, Trash2
 } from "lucide-react";
 import { useDocuments } from "@/components/documents-context";
 import FileUploadButton from "@/components/file-upload-button";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 // Client-side PDF parsing (avoid server worker issues)
 // We import lazily inside the function to keep SSR clean
 
 /* ========= Types ========= */
-type Msg = { id: string; role: "user" | "assistant"; text: string };
+type Msg = { id: string; role: "user" | "assistant"; text: string; timestamp?: number };
 type ParsedBlock = { id: string; label: string; content: string };
 type DocItem = { id: string; name: string; status?: string; file?: File };
+
+/* ========= Chat History Storage ========= */
+function getChatHistoryKey(userId: string | null): string {
+  return userId ? `rag_chat_history_v1_${userId}` : "rag_chat_history_v1_guest";
+}
+
+function saveChatHistory(userId: string | null, messages: Msg[]) {
+  try {
+    const key = getChatHistoryKey(userId);
+    // Simpan maksimal 1000 messages terakhir
+    const limited = messages.slice(-1000);
+    localStorage.setItem(key, JSON.stringify(limited));
+    console.log("Chat history saved:", limited.length, "messages");
+  } catch (e) {
+    console.error("Error saving chat history:", e);
+  }
+}
+
+function loadChatHistory(userId: string | null): Msg[] {
+  try {
+    const key = getChatHistoryKey(userId);
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const messages = JSON.parse(stored) as Msg[];
+      console.log("Chat history loaded:", messages.length, "messages");
+      return messages;
+    }
+  } catch (e) {
+    console.error("Error loading chat history:", e);
+  }
+  return [];
+}
+
+function clearChatHistory(userId: string | null) {
+  try {
+    const key = getChatHistoryKey(userId);
+    localStorage.removeItem(key);
+    console.log("Chat history cleared");
+  } catch (e) {
+    console.error("Error clearing chat history:", e);
+  }
+}
 
 /* ========= Utils ========= */
 const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
@@ -143,6 +187,8 @@ async function findDocByFile(
 export default function AssistantWorkspace() {
   const router = useRouter();
   const { documents, addFromFiles, addQuery } = useDocuments();
+  const supabase = createClient();
+  const [userId, setUserId] = useState<string | null>(null);
 
   // Dokumen aktif
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -169,6 +215,87 @@ export default function AssistantWorkspace() {
     }
   }, [documents, currentId]);
 
+  // Auto-parse dokumen yang baru di-upload dan belum diparsing
+  useEffect(() => {
+    const parseNewDocuments = async () => {
+      const docsToParse: Array<{ doc: DocItem; file: File }> = [];
+      
+      // Kumpulkan dokumen yang perlu diparsing
+      for (const doc of documents) {
+        if (!doc.file || !doc.id) continue;
+        
+        // Skip jika sedang diparsing
+        if (parsingRef.current.has(doc.id)) continue;
+        
+        // Skip jika sudah diparsing
+        const existingBlocks = parsedById[doc.id] ?? [];
+        if (existingBlocks.length > 0) continue;
+        
+        docsToParse.push({ doc, file: doc.file });
+      }
+
+      // Jika tidak ada dokumen yang perlu diparsing, skip
+      if (docsToParse.length === 0) return;
+
+      // Parse semua dokumen secara paralel
+      const parsePromises = docsToParse.map(async ({ doc, file }) => {
+        // Mark sebagai sedang diparsing
+        parsingRef.current.add(doc.id);
+        
+        try {
+          console.log(`🔄 Auto-parsing document: ${doc.name}`);
+          await autoIngest(file, doc.id, setParsedById, setOpenBlocks);
+          
+          // Set currentId jika belum ada
+          setCurrentId(prev => prev || doc.id);
+          
+          return { success: true, name: doc.name };
+        } catch (e: any) {
+          console.error(`Failed to auto-parse ${doc.name}:`, e);
+          return { success: false, name: doc.name, error: e.message || "Unknown error" };
+        } finally {
+          // Remove dari parsing set setelah selesai
+          parsingRef.current.delete(doc.id);
+        }
+      });
+
+      // Tunggu semua parsing selesai
+      const results = await Promise.all(parsePromises);
+      
+      // Tampilkan notifikasi gabungan untuk mengurangi spam
+      const successCount = results.filter(r => r.success).length;
+      const errorCount = results.filter(r => !r.success).length;
+      
+      if (successCount > 0 && errorCount === 0) {
+        // Semua berhasil
+        if (successCount === 1) {
+          addNotification('success', `✅ ${results[0].name} berhasil diparsing!`);
+        } else {
+          addNotification('success', `✅ ${successCount} dokumen berhasil diparsing!`);
+        }
+      } else if (successCount > 0 && errorCount > 0) {
+        // Sebagian berhasil
+        addNotification('success', `✅ ${successCount} dokumen berhasil diparsing, ${errorCount} gagal`);
+      } else if (errorCount > 0) {
+        // Semua gagal
+        if (errorCount === 1) {
+          addNotification('error', `❌ Gagal parsing ${results.find(r => !r.success)?.name}`);
+        } else {
+          addNotification('error', `❌ Gagal parsing ${errorCount} dokumen`);
+        }
+      }
+    };
+
+    // Delay sedikit untuk memastikan state ter-update
+    if (documents.length > 0) {
+      const timeoutId = setTimeout(() => {
+        parseNewDocuments();
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents]); // Hanya watch documents, tidak watch parsedById untuk avoid infinite loop
+
   // Hasil Parse & Extract per dokumen
   const [parsedById, setParsedById] = useState<Record<string, ParsedBlock[]>>({});
   const [extractedById, setExtractedById] = useState<Record<string, Record<string, string>>>({});
@@ -183,6 +310,9 @@ export default function AssistantWorkspace() {
   const [isParsing, setIsParsing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [copied, setCopied] = useState(false);
+  
+  // Track dokumen yang sedang diparsing untuk menghindari duplicate parsing
+  const parsingRef = useRef<Set<string>>(new Set());
 
   // Notifications
   const [notifications, setNotifications] = useState<Array<{
@@ -195,6 +325,64 @@ export default function AssistantWorkspace() {
   // Chat
   const [input, setInput] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Get userId from Supabase
+  useEffect(() => {
+    let mounted = true;
+    
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (mounted) {
+          const uid = data?.user?.id || null;
+          setUserId(uid);
+        }
+      } catch (e) {
+        console.error("Error getting user:", e);
+        if (mounted) {
+          setUserId(null);
+        }
+      }
+    })();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (mounted) {
+        const uid = session?.user?.id || null;
+        setUserId(uid);
+        // Clear chat history when user changes
+        if (uid !== userId) {
+          setMsgs([]);
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase, userId]);
+
+  // Load chat history on mount
+  useEffect(() => {
+    if (!userId) {
+      setMsgs([]);
+      setHydrated(true);
+      return;
+    }
+
+    const saved = loadChatHistory(userId);
+    if (saved.length > 0) {
+      setMsgs(saved);
+    }
+    setHydrated(true);
+  }, [userId]);
+
+  // Save chat history whenever messages change
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    saveChatHistory(userId, msgs);
+  }, [msgs, hydrated, userId]);
 
   /* ===== Handlers ===== */
 
@@ -246,39 +434,13 @@ export default function AssistantWorkspace() {
     // Tambahkan semua file ke documents context
     addFromFiles(files);
     
-    // Tunggu sebentar untuk memastikan state ter-update
-    await wait(100);
-
-    // Proses semua file secara paralel untuk efisiensi
-    const parsePromises = files.map(async (file) => {
-      try {
-        // Cari dokumen yang baru ditambahkan
-        const doc = await findDocByFile(() => documents as DocItem[], file, 30, 100);
-        if (!doc || !doc.id) {
-          console.warn(`Document not found for file: ${file.name}`);
-          return;
-        }
-        
-        // Auto-parse in background
-        addNotification('success', `Memulai parsing ${file.name}...`);
-        await autoIngest(file, doc.id, setParsedById, setOpenBlocks);
-        addNotification('success', `✅ ${file.name} berhasil diparsing!`);
-      } catch (e: any) {
-        addNotification('error', `❌ Gagal parsing ${file.name}: ${e.message || "Unknown error"}`);
-        console.error(`Failed to parse ${file.name}:`, e);
-      }
+    // Notifikasi bahwa file sedang di-upload
+    files.forEach(file => {
+      addNotification('success', `📄 ${file.name} sedang di-upload...`);
     });
-
-    // Tunggu semua parsing selesai
-    await Promise.all(parsePromises);
     
-    // Set currentId ke dokumen pertama jika belum ada
-    if (!currentId && documents.length > 0) {
-      const firstDoc = documents.find(d => d.id);
-      if (firstDoc) {
-        setCurrentId(firstDoc.id);
-      }
-    }
+    // Auto-parse akan dilakukan oleh useEffect yang watch documents changes
+    // Ini lebih reliable karena tidak bergantung pada timing state update
   };
 
   /** Parse manual dari kartu Studio */
@@ -313,7 +475,8 @@ export default function AssistantWorkspace() {
     addQuery(text);
 
     const id = crypto.randomUUID?.() ?? `${Date.now()}`;
-    setMsgs((m) => [...m, { id, role: "user", text }]);
+    const userMsg: Msg = { id, role: "user", text, timestamp: Date.now() };
+    setMsgs((m) => [...m, userMsg]);
     setInput("");
 
     try {
@@ -429,12 +592,16 @@ export default function AssistantWorkspace() {
       if (!res.ok) throw new Error(d?.error || "Query gagal");
 
       const answer = (d.answer as string) || "Saya tidak tahu.";
-      setMsgs((m) => [...m, { id: `${id}-a`, role: "assistant", text: answer }]);
+      const assistantMsg: Msg = { id: `${id}-a`, role: "assistant", text: answer, timestamp: Date.now() };
+      setMsgs((m) => [...m, assistantMsg]);
     } catch (e: any) {
-      setMsgs((m) => [
-        ...m,
-        { id: `${id}-a`, role: "assistant", text: `❌ ${e.message || "Query error"}` },
-      ]);
+      const errorMsg: Msg = { 
+        id: `${id}-a`, 
+        role: "assistant", 
+        text: `❌ ${e.message || "Query error"}`, 
+        timestamp: Date.now() 
+      };
+      setMsgs((m) => [...m, errorMsg]);
     } finally {
       setIsParsing(false);
     }
@@ -445,26 +612,36 @@ export default function AssistantWorkspace() {
 
 
   function PreviewPane() {
-    if (!currentDoc) return null;
+    if (!currentDoc) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center p-8">
+          <FileText className="h-16 w-16 text-muted-foreground mb-4 opacity-50" />
+          <p className="text-muted-foreground">Belum ada dokumen yang dipilih</p>
+          <p className="text-sm text-muted-foreground mt-2">Upload dokumen untuk melihat preview</p>
+        </div>
+      );
+    }
     const ext = (currentDoc.name.split(".").pop() || "").toLowerCase();
     const isPDF = ext === "pdf";
     const isImg = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
 
     if (isPDF && previewUrl) {
-      return <iframe src={previewUrl} className="w-full h-[260px] rounded-md border border-border" />;
+      return <iframe src={previewUrl} className="w-full h-full rounded-md border border-border" />;
     }
     if (isImg && previewUrl) {
       // eslint-disable-next-line @next/next/no-img-element
-      return <img src={previewUrl} alt={currentDoc.name} className="w-full max-h-[260px] object-contain rounded-md border border-border" />;
+      return <img src={previewUrl} alt={currentDoc.name} className="w-full h-full object-contain rounded-md border border-border" />;
     }
     return (
-      <div className="text-xs text-muted-foreground">
-        Preview tidak tersedia untuk .{ext}. (Saran: konversi ke PDF.)
+      <div className="flex items-center justify-center h-full text-center p-8">
+        <div className="text-sm text-muted-foreground">
+          Preview tidak tersedia untuk .{ext}. (Saran: konversi ke PDF.)
+        </div>
       </div>
     );
   }
 
-  /* ===== UI: NotebookLM-style (Sumber | Chat | Studio) ===== */
+  /* ===== UI: Split Layout (Preview Kiri | Parse/Chat Kanan) ===== */
   return (
     <div className="min-h-screen page-gradient">
       {/* Header */}
@@ -473,10 +650,38 @@ export default function AssistantWorkspace() {
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-semibold text-gradient">Document AI Assistant</h1>
           </div>
+          <div className="flex items-center gap-3">
+            <FileUploadButton
+              onSelectFiles={onUpload}
+              label="Upload Dokumen"
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              multiple
+            />
+            {documents.length > 0 && (
+              <div className="flex items-center gap-2">
+                {documents.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => setCurrentId(d.id)}
+                    className={`px-3 py-1.5 rounded-md border text-sm transition ${
+                      currentId === d.id
+                        ? "btn-gradient border-primary"
+                        : "border-border hover:bg-muted/40"
+                    }`}
+                    title={`${d.name} — ${d.status ?? ""}`}
+                  >
+                    <span className="truncate max-w-[150px] block">{d.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <main className="p-4 md:p-6 overflow-auto">
+      <main className="h-[calc(100vh-4rem)] flex">
         {/* Notifications */}
         {notifications.length > 0 && (
           <div className="fixed top-20 right-4 z-50 space-y-2">
@@ -497,242 +702,190 @@ export default function AssistantWorkspace() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-
-        {/* ========== SUMBER (kiri) ========== */}
-        <Card className="lg:col-span-3 bg-card/70 glass soft-shadow hover-card flex flex-col">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Sumber</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+        {/* ========== PREVIEW DOKUMEN (Kiri) ========== */}
+        <div className="w-1/2 border-r border-border bg-card/30 p-4 flex flex-col">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <FileUploadButton
-                onSelectFiles={onUpload}
-                label="Tambah"
-                size="sm"
-                variant="outline"
-                className="gap-2"
-                multiple
-              />
-            </div>
-
-            <Separator />
-
-            <div className="space-y-2">
-              {documents.length ? (
-                documents.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => setCurrentId(d.id)}
-                    className={`w-full text-left px-3 py-2 rounded-md border text-sm transition
-                    ${currentId === d.id
-                      ? "btn-gradient border-primary"
-                      : "border-border hover:bg-muted/40"}`}
-                    title={`${d.name} — ${d.status ?? ""}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="truncate">{d.name}</span>
-                      {d.status && (
-                        <Badge 
-                          variant={d.status === "Processed" ? "default" : "outline"} 
-                          className={cn("ml-2", d.status === "Processed" && "btn-gradient")}
-                        >
-                          {d.status}
-                        </Badge>
-                      )}
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="text-xs text-muted-foreground">Belum ada sumber. Klik <b>Tambah</b> untuk mengunggah file.</div>
-              )}
-            </div>
-
-            <Separator />
-            {currentDoc && (
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">Pratinjau</div>
-                <PreviewPane />
-                {previewUrl && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = previewUrl!;
-                      a.download = currentDoc.name;
-                      a.click();
-                    }}
-                  >
-                    <Download className="h-4 w-4 mr-2" /> Download
-                  </Button>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ========== CHAT (tengah) ========== */}
-        <Card className="lg:col-span-6 bg-card/70 glass soft-shadow hover-card flex flex-col min-h-[70vh]">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <Bot className="h-5 w-5" />
-              <CardTitle className="text-base">Chat</CardTitle>
+              <FileText className="h-5 w-5" />
+              <h2 className="text-lg font-semibold">Preview Dokumen</h2>
               {currentDoc && <Badge variant="outline" className="ml-2">{currentDoc.name}</Badge>}
             </div>
-          </CardHeader>
-
-          <CardContent className="pt-4 flex-1 overflow-auto space-y-4">
-            {msgs.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-8">
-                <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>Halo! Bagaimana saya dapat membantu Anda hari ini?</p>
-                <p className="mt-2 text-xs opacity-75">• Upload dokumen di panel "Sumber" untuk chat dengan konteks</p>
-                <p className="text-xs opacity-75">• Atau langsung tanyakan apapun di sini</p>
-              </div>
-            ) : (
-              msgs.map((m) => (
-                <div
-                  key={m.id}
-                  className={`flex items-start gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  {m.role === "assistant" && (
-                    <div className="mt-1 rounded-full p-2 bg-muted/50">
-                      <Bot className="h-4 w-4" />
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
-                      m.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-br-sm"
-                        : "bg-muted/40 text-foreground rounded-bl-sm"
-                    }`}
-                  >
-                    {m.text}
-                  </div>
-                  {m.role === "user" && (
-                    <div className="mt-1 rounded-full p-2 bg-muted/50">
-                      <User className="h-4 w-4" />
-                    </div>
-                  )}
-                </div>
-              ))
+            {previewUrl && currentDoc && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = previewUrl!;
+                  a.download = currentDoc.name;
+                  a.click();
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" /> Download
+              </Button>
             )}
-          </CardContent>
-
-          <div className="p-4 border-t border-border flex items-end gap-3">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Tulis prompt kamu…"
-              className="min-h-[64px] resize-none flex-1"
-              onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendChat(); }}
-            />
-            <Button className="gap-2 btn-gradient" onClick={sendChat} disabled={isParsing}>
-              <Send className="h-4 w-4" />
-              Kirim
-            </Button>
           </div>
-        </Card>
+          <div className="flex-1 overflow-auto rounded-md border border-border bg-background">
+            <PreviewPane />
+          </div>
+        </div>
 
-        {/* ========== STUDIO (kanan) ========== */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Kartu Parse */}
-          <Card className="bg-card/70 glass soft-shadow hover-card">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Parse</CardTitle>
-                <div className="text-xs text-muted-foreground">
-                  Auto-parse saat upload
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {parsedBlocks.length ? (
-                <div className="max-h-[260px] overflow-auto space-y-2 pr-1">
-                  {parsedBlocks.map((b) => {
-                    const isOpen = blockOpen(b.id);
-                    return (
-                      <div key={b.id} className="rounded-md border border-border/60">
-                        <button
-                          className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
-                          onClick={() =>
-                            setOpenBlocks((prev) => ({
-                              ...prev,
-                              [currentId!]: { ...(prev[currentId!] ?? {}), [b.id]: !isOpen },
-                            }))
+        {/* ========== PARSE & CHAT (Kanan) ========== */}
+        <div className="w-1/2 p-4 flex flex-col">
+          <Tabs defaultValue="chat" className="flex flex-col h-full">
+            <TabsList className="mb-4">
+              <TabsTrigger value="parse" className="gap-2">
+                <FileText className="h-4 w-4" />
+                Parse
+              </TabsTrigger>
+              <TabsTrigger value="chat" className="gap-2">
+                <Bot className="h-4 w-4" />
+                Chat
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Tab Parse */}
+            <TabsContent value="parse" className="flex-1 overflow-auto">
+              <Card className="bg-card/70 glass soft-shadow hover-card h-full flex flex-col">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">Hasil Parse</CardTitle>
+                    <div className="text-xs text-muted-foreground">
+                      Auto-parse saat upload
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex-1 overflow-auto">
+                  {parsedBlocks.length ? (
+                    <div className="space-y-2 pr-1">
+                      {parsedBlocks.map((b) => {
+                        const isOpen = blockOpen(b.id);
+                        return (
+                          <div key={b.id} className="rounded-md border border-border/60">
+                            <button
+                              className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/40 transition"
+                              onClick={() =>
+                                setOpenBlocks((prev) => ({
+                                  ...prev,
+                                  [currentId!]: { ...(prev[currentId!] ?? {}), [b.id]: !isOpen },
+                                }))
+                              }
+                            >
+                              <span className="truncate">{b.label}</span>
+                              {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </button>
+                            {isOpen && (
+                              <div className="px-3 pb-3">
+                                <pre className="whitespace-pre-wrap text-xs bg-muted/30 p-2 rounded">{b.content}</pre>
+                                <div className="pt-2">
+                                  <Button
+                                    variant="ghost" size="sm"
+                                    onClick={async () => await navigator.clipboard.writeText(b.content)}
+                                  >
+                                    <Copy className="h-4 w-4 mr-1" /> Copy
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-center">
+                      <FileText className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                      <p className="text-sm text-muted-foreground">Belum ada hasil parse</p>
+                      <p className="text-xs text-muted-foreground mt-2">Upload dokumen untuk auto-parse</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Tab Chat */}
+            <TabsContent value="chat" className="flex-1 overflow-hidden flex flex-col">
+              <Card className="bg-card/70 glass soft-shadow hover-card h-full flex flex-col">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Bot className="h-5 w-5" />
+                      <CardTitle className="text-base">Chat dengan Dokumen</CardTitle>
+                      {currentDoc && <Badge variant="outline" className="ml-2">{currentDoc.name}</Badge>}
+                    </div>
+                    {msgs.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (confirm("Apakah Anda yakin ingin menghapus semua history chat?")) {
+                            setMsgs([]);
+                            clearChatHistory(userId);
                           }
+                        }}
+                        className="gap-2"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Hapus History
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+
+                <CardContent className="pt-4 flex-1 overflow-auto space-y-4">
+                  {msgs.length === 0 ? (
+                    <div className="text-sm text-muted-foreground text-center py-8">
+                      <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>Halo! Bagaimana saya dapat membantu Anda hari ini?</p>
+                      <p className="mt-2 text-xs opacity-75">• Upload dokumen untuk chat dengan konteks</p>
+                      <p className="text-xs opacity-75">• Atau langsung tanyakan apapun di sini</p>
+                    </div>
+                  ) : (
+                    msgs.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`flex items-start gap-3 ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                      >
+                        {m.role === "assistant" && (
+                          <div className="mt-1 rounded-full p-2 bg-muted/50">
+                            <Bot className="h-4 w-4" />
+                          </div>
+                        )}
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                            m.role === "user"
+                              ? "bg-primary text-primary-foreground rounded-br-sm"
+                              : "bg-muted/40 text-foreground rounded-bl-sm"
+                          }`}
                         >
-                          <span className="truncate">{b.label}</span>
-                          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </button>
-                        {isOpen && (
-                          <div className="px-3 pb-3">
-                            <pre className="whitespace-pre-wrap text-xs">{b.content}</pre>
-                            <div className="pt-2">
-                              <Button
-                                variant="ghost" size="sm"
-                                onClick={async () => await navigator.clipboard.writeText(b.content)}
-                              >
-                                <Copy className="h-4 w-4 mr-1" /> Copy
-                              </Button>
-                            </div>
+                          {m.text}
+                        </div>
+                        {m.role === "user" && (
+                          <div className="mt-1 rounded-full p-2 bg-muted/50">
+                            <User className="h-4 w-4" />
                           </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">Belum ada hasil. Unggah file untuk auto-parse.</div>
-              )}
-            </CardContent>
-          </Card>
+                    ))
+                  )}
+                </CardContent>
 
-          {/* Kartu Extract */}
-          <Card className="bg-card/70 glass soft-shadow hover-card">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Extract</CardTitle>
-                <Button size="sm" variant="secondary" onClick={runExtract} disabled={!currentDoc?.file || isExtracting} className="gap-2">
-                  <Play className="h-4 w-4" />
-                  {isExtracting ? "Extracting..." : "Jalankan"}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {Object.keys(extracted).length ? (
-                <div className="space-y-3 max-h-[260px] overflow-auto pr-1">
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {Object.entries(extracted).map(([k, v]) => (
-                        <tr key={k} className="border-b border-border/50">
-                          <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{k}</td>
-                          <td className="py-1.5 text-muted-foreground">{v}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(JSON.stringify(extracted, null, 2));
-                      setCopied(true); setTimeout(() => setCopied(false), 1200);
-                    }}
-                  >
-                    {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
-                    {copied ? "Copied" : "Copy JSON"}
+                <div className="p-4 border-t border-border flex items-end gap-3">
+                  <Textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Tulis prompt kamu…"
+                    className="min-h-[64px] resize-none flex-1"
+                    onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendChat(); }}
+                  />
+                  <Button className="gap-2 btn-gradient" onClick={sendChat} disabled={isParsing}>
+                    <Send className="h-4 w-4" />
+                    Kirim
                   </Button>
                 </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">Belum ada hasil. Klik <b>Jalankan</b> untuk mengekstrak metadata sederhana.</div>
-              )}
-            </CardContent>
-          </Card>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
-      </div>
       </main>
     </div>
   );

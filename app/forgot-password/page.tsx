@@ -21,13 +21,53 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${location.origin}/reset-password`,
-    });
-      if (error) throw error;
-      setOk("Link reset password sudah dikirim ke email Anda.");
+      // Pastikan email tidak kosong
+      if (!email || !email.trim()) {
+        setErr("Email tidak boleh kosong");
+        setLoading(false);
+        return;
+      }
+
+      // Pastikan format email valid
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        setErr("Format email tidak valid");
+        setLoading(false);
+        return;
+      }
+
+      // Gunakan window.location.origin untuk konsistensi
+      const redirectUrl = typeof window !== 'undefined' 
+        ? `${window.location.origin}/reset-password`
+        : `${location.origin}/reset-password`;
+
+      console.log('🔄 Requesting password reset for:', email);
+      console.log('📍 Redirect URL:', redirectUrl);
+
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: redirectUrl,
+      });
+
+      if (error) {
+        console.error('❌ Supabase error:', error);
+        // Tampilkan error yang lebih informatif
+        if (error.message.includes('rate limit')) {
+          setErr("Terlalu banyak permintaan. Silakan coba lagi nanti.");
+        } else if (error.message.includes('email')) {
+          setErr("Email tidak ditemukan atau tidak valid.");
+        } else if (error.message.includes('redirect')) {
+          setErr("URL redirect tidak dikonfigurasi. Silakan hubungi administrator.");
+        } else {
+          setErr(error.message || "Gagal mengirim link reset password. Pastikan email terdaftar.");
+        }
+        return;
+      }
+
+      console.log('✅ Password reset email sent successfully');
+      setOk("Link reset password sudah dikirim ke email Anda. Silakan cek inbox atau folder spam.");
     } catch (e: any) {
-      setErr(e.message || "Gagal mengirim link reset password");
+      console.error('❌ Unexpected error:', e);
+      setErr(e.message || "Terjadi kesalahan. Silakan coba lagi atau hubungi administrator.");
     } finally {
       setLoading(false);
     }
