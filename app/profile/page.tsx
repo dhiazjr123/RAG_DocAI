@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Camera, Mail, Phone, MapPin, Calendar, Edit3, Save, X } from "lucide-react";
+import { ArrowLeft, Camera, Mail, Phone, MapPin, Calendar, Edit3, Save, X, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/client";
 import { useDocuments } from "@/components/documents-context";
-import { getActivities, getDaysActive, addActivity, type Activity } from "@/lib/activity-tracker";
+import { getActivities, getDaysActive, addActivity, deleteActivity, type Activity } from "@/lib/activity-tracker";
 
 type ProfileData = {
   name: string;
@@ -65,6 +65,9 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Calculate real-time stats
   const documentsProcessed = documents.filter(d => d.status === "Processed").length;
@@ -164,12 +167,27 @@ export default function ProfilePage() {
     setActivities(getActivities(userId));
   }, [userId, documents, recentQueries]);
 
+  // Cleanup preview URL when component unmounts or avatar changes
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+    };
+  }, [avatarPreview]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
       // Save to localStorage
       const profileKey = getProfileKey(userId);
-      localStorage.setItem(profileKey, JSON.stringify(profileData));
+      
+      // Jika ada avatar preview, pastikan profileData sudah menggunakan URL yang benar
+      const finalProfileData = avatarPreview 
+        ? { ...profileData, avatar: profileData.avatar } 
+        : profileData;
+      
+      localStorage.setItem(profileKey, JSON.stringify(finalProfileData));
       
       // Track activity
       addActivity(userId, "profile_updated", "Updated profile information");
@@ -178,39 +196,124 @@ export default function ProfilePage() {
       if (userId) {
         const { error } = await supabase.auth.updateUser({
           data: {
-            full_name: profileData.name,
-            name: profileData.name,
-            phone: profileData.phone,
-            location: profileData.location,
-            department: profileData.department,
-            role: profileData.role,
-            bio: profileData.bio,
-            avatar: profileData.avatar,
+            full_name: finalProfileData.name,
+            name: finalProfileData.name,
+            phone: finalProfileData.phone,
+            location: finalProfileData.location,
+            department: finalProfileData.department,
+            role: finalProfileData.role,
+            bio: finalProfileData.bio,
+            avatar: finalProfileData.avatar,
           }
         });
         
         if (error) {
           console.error("Error updating user metadata:", error);
+          // Tetap lanjutkan karena data sudah tersimpan di localStorage
+          // Hanya log error, tidak throw agar user tetap bisa save
         }
       }
       
-      setOriginalProfile(profileData);
+      setOriginalProfile(finalProfileData);
+      setProfileData(finalProfileData);
+      
+      // Cleanup preview URL setelah save
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+      setAvatarPreview(null);
       setIsEditing(false);
       
       // Reload activities
       setActivities(getActivities(userId));
       
-      console.log("Profile saved:", profileData);
-    } catch (e) {
+      console.log("Profile saved:", finalProfileData);
+      alert("Profile berhasil disimpan!");
+    } catch (e: any) {
       console.error("Error saving profile:", e);
+      const errorMessage = e?.message || "Terjadi kesalahan saat menyimpan profile. Silakan coba lagi.";
+      alert(`Gagal menyimpan profile: ${errorMessage}`);
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancel = () => {
+    // Cleanup preview URL
+    if (avatarPreview) {
+      URL.revokeObjectURL(avatarPreview);
+    }
     setProfileData(originalProfile);
+    setAvatarPreview(null);
     setIsEditing(false);
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    // Validasi tipe file
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      alert('Format file tidak didukung. Gunakan JPG, PNG, GIF, atau WebP.');
+      return;
+    }
+
+    // Validasi ukuran file (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file terlalu besar. Maksimal 5MB.');
+      return;
+    }
+
+    setUploadingAvatar(true);
+
+    try {
+      // Create preview
+      const previewUrl = URL.createObjectURL(file);
+      setAvatarPreview(previewUrl);
+
+      // Upload ke server via API route
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/avatar/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Gagal mengunggah foto');
+      }
+
+      // Get public URL from API response
+      const publicUrl = result.url;
+
+      // Update profile data dengan URL dari Supabase
+      setProfileData({ ...profileData, avatar: publicUrl });
+
+      console.log('Avatar uploaded successfully:', publicUrl);
+    } catch (error: any) {
+      console.error('Error handling avatar upload:', error);
+      let errorMessage = 'Terjadi kesalahan saat mengunggah foto. ';
+      
+      if (error?.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Silakan coba lagi.';
+      }
+      
+      alert(errorMessage);
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+      setAvatarPreview(null);
+    } finally {
+      setUploadingAvatar(false);
+      // Reset input file
+      e.target.value = '';
+    }
   };
 
   if (loading) {
@@ -284,16 +387,41 @@ export default function ProfilePage() {
               <div className="flex flex-col items-center text-center space-y-4">
                 <div className="relative">
                   <Avatar className="h-24 w-24">
-                    <AvatarImage src={profileData.avatar} />
-                    <AvatarFallback className="text-2xl">JD</AvatarFallback>
+                    <AvatarImage src={avatarPreview || profileData.avatar} />
+                    <AvatarFallback className="text-2xl">
+                      {profileData.name
+                        .split(' ')
+                        .map((n) => n[0])
+                        .join('')
+                        .toUpperCase()
+                        .slice(0, 2) || 'JD'}
+                    </AvatarFallback>
                   </Avatar>
                   {isEditing && (
-                    <Button
-                      size="sm"
-                      className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full btn-gradient"
-                    >
-                      <Camera className="h-4 w-4" />
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={uploadingAvatar}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full btn-gradient cursor-pointer"
+                        title="Ubah foto profil"
+                      >
+                        {uploadingAvatar ? (
+                          <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Camera className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <input
+                        ref={fileInputRef}
+                        id="avatar-upload"
+                        type="file"
+                        accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                        onChange={handleAvatarChange}
+                        className="hidden"
+                      />
+                    </>
                   )}
                 </div>
                 
@@ -429,7 +557,9 @@ export default function ProfilePage() {
 
             {/* Recent Activity */}
             <Card className="p-6 glass soft-shadow">
-              <h3 className="text-lg font-semibold mb-4 text-gradient">Recent Activity</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gradient">Recent Activity</h3>
+              </div>
               <div className="space-y-3">
                 {activities.length > 0 ? (
                   activities.slice(0, 10).map((activity) => {
@@ -440,12 +570,22 @@ export default function ProfilePage() {
                       "bg-purple-500";
                     
                     return (
-                      <div key={activity.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
+                      <div key={activity.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/40 transition-colors group">
                         <div className={`h-2 w-2 rounded-full ${color}`}></div>
                         <div className="flex-1">
                           <p className="text-sm font-medium">{activity.message}</p>
                           <p className="text-xs text-muted-foreground">{timeAgo}</p>
                         </div>
+                        <button
+                          onClick={() => {
+                            deleteActivity(userId, activity.id);
+                            setActivities(getActivities(userId));
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-red-500/20 text-red-500 hover:text-red-600"
+                          title="Hapus activity"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
                     );
                   })

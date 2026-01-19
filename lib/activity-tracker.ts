@@ -73,3 +73,22 @@ export function getDaysActive(userId: string | null): number {
   return Math.max(1, daysDiff + 1); // At least 1 day
 }
 
+export function deleteActivity(userId: string | null, activityId: string): void {
+  try {
+    const key = getActivityKey(userId);
+    const activities: Activity[] = JSON.parse(localStorage.getItem(key) || "[]");
+    const filtered = activities.filter(a => a.id !== activityId);
+    localStorage.setItem(key, JSON.stringify(filtered));
+  } catch (e) {
+    console.error("Error deleting activity:", e);
+  }
+}
+
+export function clearAllActivities(userId: string | null): void {
+  try {
+    const key = getActivityKey(userId);
+    localStorage.setItem(key, JSON.stringify([]));
+  } catch (e) {
+    console.error("Error clearing activities:", e);
+  }
+}
