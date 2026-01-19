@@ -3,6 +3,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ForgotPasswordPage() {
@@ -74,11 +76,27 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-b from-background to-muted/40 p-6">
-      <div className="w-full max-w-md bg-background border border-border rounded-lg shadow-md p-8">
-        <h1 className="text-2xl font-semibold text-center">
-          Forgotten your password?
-        </h1>
+    <main className="min-h-screen flex flex-col bg-gradient-to-b from-background to-muted/40">
+      {/* Header */}
+      <div className="border-b border-border bg-card/70 glass soft-shadow">
+        <div className="flex h-16 items-center px-6">
+          <Button 
+            variant="default" 
+            size="sm" 
+            onClick={() => router.back()}
+            className="ring-ambient btn-gradient btn-press"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+        </div>
+      </div>
+      
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-background border border-border rounded-lg shadow-md p-8">
+          <h1 className="text-2xl font-semibold text-center">
+            Forgotten your password?
+          </h1>
         <p className="text-sm text-muted-foreground text-center mt-1 mb-6">
           We will send a message to reset your password.
         </p>
@@ -118,6 +136,7 @@ export default function ForgotPasswordPage() {
             {loading ? "Sending..." : "Send Reset Link"}
           </button>
         </form>
+        </div>
       </div>
     </main>
   );

@@ -65,7 +65,7 @@ export default function SettingsPage() {
               variant="default" 
               size="sm" 
               onClick={() => router.back()}
-              className="ring-ambient btn-gradient"
+              className="ring-ambient btn-gradient btn-press"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
